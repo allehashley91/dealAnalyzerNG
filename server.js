@@ -14,6 +14,24 @@ app.use(express.static(path.join(__dirname, "public")));
 // Health check — Railway pings this to confirm the app is alive
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
+// API key diagnostic — lets the frontend check if the key is set and valid
+app.get("/api/health", async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ ok: false, error: "ANTHROPIC_API_KEY is not set in environment variables." });
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 10, messages: [{ role: "user", content: "Hi" }] }),
+    });
+    const data = await response.json();
+    if (!response.ok) return res.status(500).json({ ok: false, error: data?.error?.message || JSON.stringify(data) });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Proxy to Anthropic — keeps API key server-side
 app.post("/api/analyze", async (req, res) => {
   try {

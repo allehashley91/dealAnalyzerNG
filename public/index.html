@@ -87,7 +87,8 @@
       return {
         escrowSell,realtorFee,transferTax,totalSellCosts,netSalesPrice,
         escrowBuy,titleIns,recFeesBuy,titleSearch,totalPurchaseCosts,
-        firstMtg,secondMtg,downPayment,insuranceHold,utilities,financingCosts,totalHolding,
+        firstMtg,secondMtg,downPayment,insuranceHold,utilities,
+        firstMtgInt,secondMtgInt,rehabHold,financingCosts,totalHolding,
         netProfit,profitPct,profitPerSqft,pricePerSqft,arvPerSqft,
         totalCommitted,annualizedCOC,meetsProfit,meetsRoi,meetsSqft,verdict,
         maxPP_40k,maxPP_75,maxPP_25sqft,bindingMaxPP,
@@ -139,7 +140,7 @@
     async function callAPI(messages, maxTokens=1500) {
       const res=await fetch("/api/analyze",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:maxTokens,messages})
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:maxTokens,messages})
       });
       if(!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`);
       const data=await res.json();
@@ -162,52 +163,204 @@
               <VBadge v={r.verdict}/>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="bg-gray-800 rounded-xl p-3">
-              <div className="text-indigo-400 font-bold mb-2 uppercase tracking-wide">📊 Key Metrics</div>
+          {/* Key Metrics */}
+          <div className="bg-gray-800 rounded-xl p-3 mb-3">
+            <div className="text-indigo-400 font-bold mb-2 uppercase tracking-wide">📊 Key Metrics</div>
+            <div className="grid grid-cols-2 gap-x-6">
               {[
                 ["Net Profit",fmtD(r.netProfit),r.meetsProfit,"≥$40K"],
-                ["Profit %",fmtPct(r.profitPct),r.meetsRoi,"≥7.5%"],
+                ["Profit %",fmtPct(r.profitPct),r.meetsRoi,"≥7.5% of ARV"],
                 ["Profit / sqft","$"+fmt(r.profitPerSqft,2),r.meetsSqft,"≥$25/sqft"],
+                ["Ann. Cash-on-Cash",fmtPct(r.annualizedCOC),r.annualizedCOC>0,""],
                 ["Price / sqft","$"+fmt(r.pricePerSqft,2),true,""],
                 ["ARV / sqft","$"+fmt(r.arvPerSqft,2),true,""],
-                ["Ann. Cash-on-Cash",fmtPct(r.annualizedCOC),r.annualizedCOC>0,""],
               ].map(([l,v,ok,target])=>(
                 <div key={l} className="flex justify-between py-1 border-b border-gray-700">
-                  <span className="text-gray-400">{l}{target&&<span className="text-gray-600 ml-1">({target})</span>}</span>
+                  <span className="text-gray-400">{l}{target&&<span className="text-gray-500 ml-1">({target})</span>}</span>
                   <span className={`font-bold ${sc(ok)}`}>{v}</span>
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* ── DETAILED COST BREAKDOWN ── */}
+          <div className="space-y-3 mb-3">
+
+            {/* 1. Selling Revenue */}
             <div className="bg-gray-800 rounded-xl p-3">
-              <div className="text-indigo-400 font-bold mb-2 uppercase tracking-wide">💰 Cost Breakdown</div>
-              {[["Purchase Price",d.purchasePrice],["Buy Costs",r.totalPurchaseCosts],["Rehab",d.rehabCost],["Holding Costs",r.totalHolding],["Sell Costs",r.totalSellCosts]].map(([l,v])=>(
-                <div key={l} className="flex justify-between py-1 border-b border-gray-700">
-                  <span className="text-gray-400">{l}</span><span>{fmtD(v)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between py-1 border-b border-gray-700 font-bold">
-                <span className="text-gray-300">Total All-In</span><span>{fmtD(d.arv-r.netProfit)}</span>
+              <div className="text-green-400 font-bold mb-2 uppercase tracking-wide">💵 Selling Revenue</div>
+              <div className="flex justify-between py-1 border-b border-gray-700">
+                <span className="text-gray-300 font-semibold">Gross Sales Price (ARV)</span>
+                <span className="font-bold text-green-300">{fmtD(d.arv)}</span>
               </div>
-              <div className={`flex justify-between pt-2 font-bold text-sm ${r.meetsProfit?"text-green-400":"text-red-400"}`}>
-                <span>Net Profit</span><span>{fmtD(r.netProfit)}</span>
+              <div className="mt-1 ml-3 space-y-0.5">
+                {[
+                  ["Escrow Fees","ARV × $4 per $1,000",r.escrowSell],
+                  ["Realtor Commission",`ARV × ${d.realtorPct}%`,r.realtorFee],
+                  ["Transfer Tax",`ARV × ${d.transferTaxPct}%`,r.transferTax],
+                  ["Home Warranty","Fixed",d.homeWarranty],
+                  ["Staging","Fixed",d.staging],
+                  ["Marketing","Fixed",d.marketing],
+                  ["Recording Fees (Sell)","Fixed",d.sellingRecordingFees],
+                ].map(([l,basis,v])=>(
+                  <div key={l} className="flex justify-between py-0.5 border-b border-gray-700/50">
+                    <span className="text-gray-400">− {l} <span className="text-gray-600 italic">({basis})</span></span>
+                    <span className="text-red-300">{fmtD(v)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between py-1.5 mt-1 border-t border-gray-600 font-bold">
+                <span className="text-gray-200">Net Sales Price</span>
+                <span className="text-green-300">{fmtD(r.netSalesPrice)}</span>
               </div>
             </div>
+
+            {/* 2. Purchase & Buying Costs */}
+            <div className="bg-gray-800 rounded-xl p-3">
+              <div className="text-purple-400 font-bold mb-2 uppercase tracking-wide">🏠 Purchase & Buying Costs</div>
+              <div className="flex justify-between py-1 border-b border-gray-700">
+                <span className="text-gray-300 font-semibold">Purchase Price</span>
+                <span className="font-bold text-purple-300">{fmtD(d.purchasePrice)}</span>
+              </div>
+              <div className="text-gray-500 text-xs mt-1 mb-0.5 ml-1">Buying Closing Costs:</div>
+              <div className="ml-3 space-y-0.5">
+                {[
+                  ["Escrow Fees","PP × $4 per $1,000",r.escrowBuy],
+                  ["Financing Origination","Fixed / entered",d.originationCost],
+                  ["Title Insurance","$500 + (PP × 0.25%)",r.titleIns],
+                  ["Recording Fees (Buy)",d.originationCost>0?"Mortgage present → $200":"No mortgage → $100",r.recFeesBuy],
+                  ["Title Search","Fixed $225",r.titleSearch],
+                ].map(([l,basis,v])=>(
+                  <div key={l} className="flex justify-between py-0.5 border-b border-gray-700/50">
+                    <span className="text-gray-400">+ {l} <span className="text-gray-600 italic">({basis})</span></span>
+                    <span className="text-red-300">{fmtD(v)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between py-1 mt-1 border-t border-gray-600">
+                <span className="text-gray-400">Total Buying Closing Costs</span>
+                <span className="text-red-300">{fmtD(r.totalPurchaseCosts)}</span>
+              </div>
+              <div className="text-gray-500 text-xs mt-2 mb-0.5 ml-1">Financing Structure:</div>
+              <div className="ml-3 space-y-0.5">
+                {[
+                  ["1st Mortgage",`PP × ${d.firstMortgagePct}%`,r.firstMtg],
+                  ["2nd Mortgage",`PP × ${d.secondMortgagePct}%`,r.secondMtg],
+                  ["Down Payment (out-of-pocket)","PP − 1st − 2nd",r.downPayment],
+                ].map(([l,basis,v])=>(
+                  <div key={l} className="flex justify-between py-0.5 border-b border-gray-700/50">
+                    <span className="text-gray-400">{l} <span className="text-gray-600 italic">({basis})</span></span>
+                    <span className="text-gray-300">{fmtD(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Rehab */}
+            <div className="bg-gray-800 rounded-xl p-3">
+              <div className="text-yellow-400 font-bold mb-2 uppercase tracking-wide">🔨 Rehab Costs</div>
+              <div className="flex justify-between py-1 border-b border-gray-700">
+                <span className="text-gray-300 font-semibold">Estimated Rehab Cost <span className="text-gray-600 italic font-normal">(entered directly)</span></span>
+                <span className="font-bold text-red-300">{fmtD(d.rehabCost)}</span>
+              </div>
+              {d.sqft>0&&(
+                <div className="flex justify-between py-0.5 mt-1">
+                  <span className="text-gray-500">Cost per sq ft</span>
+                  <span className="text-gray-400">${fmt(d.rehabCost/d.sqft,2)}/sqft ({d.sqft.toLocaleString()} sqft)</span>
+                </div>
+              )}
+              {d.rehabNotes&&(
+                <div className="mt-2 pt-2 border-t border-gray-700">
+                  <div className="text-gray-500 text-xs mb-1">Scope Notes:</div>
+                  <div className="text-gray-400 whitespace-pre-wrap leading-relaxed">{d.rehabNotes}</div>
+                </div>
+              )}
+            </div>
+
+            {/* 4. Holding Costs */}
+            <div className="bg-gray-800 rounded-xl p-3">
+              <div className="text-orange-400 font-bold mb-2 uppercase tracking-wide">⏱️ Holding Costs <span className="text-gray-500 font-normal normal-case">({d.holdMonths} months)</span></div>
+              <div className="space-y-0.5">
+                {[
+                  ["Insurance",
+                    d.occupied
+                      ? `Occupied: (PP × $0.77/$1K + $500) × ${d.holdMonths}/12`
+                      : `Vacant: (PP × $6/$1K + $500) × ${d.holdMonths}/12`,
+                    r.insuranceHold],
+                  ["Property Taxes",`Annual ${fmtD(d.propertyTaxes)} × ${d.holdMonths}/12`,d.propertyTaxes*(d.holdMonths/12)],
+                  ["Utilities",`$${d.utilityMonthly}/mo × ${d.holdMonths} months`,r.utilities],
+                  ["1st Mtg Interest",`${fmtD(r.firstMtg)} × ${d.firstMortgageRate}% × ${d.holdMonths}/12`,r.firstMtg*(d.firstMortgageRate/100)*(d.holdMonths/12)],
+                  ...(d.secondMortgagePct>0?[["2nd Mtg Interest",`${fmtD(r.secondMtg)} × ${d.secondMortgageRate}% × ${d.holdMonths}/12`,r.secondMtg*(d.secondMortgageRate/100)*(d.holdMonths/12)]]:
+                    [["2nd Mtg Interest","No 2nd mortgage",0]]),
+                  ["Rehab Capital Cost",`Rehab/2 × ${d.internalCapitalRate}% internal rate × ${d.holdMonths}/12`,r.rehabHold||0],
+                  ["Prepayment Penalties","Fixed",d.prepaymentPenalties],
+                ].map(([l,basis,v])=>(
+                  <div key={l} className="flex justify-between py-0.5 border-b border-gray-700/50">
+                    <span className="text-gray-400">{l} <span className="text-gray-600 italic">({basis})</span></span>
+                    <span className="text-red-300">{fmtD(v)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between py-1.5 mt-1 border-t border-gray-600 font-bold">
+                <span className="text-gray-200">Total Holding Costs</span>
+                <span className="text-red-300">{fmtD(r.totalHolding)}</span>
+              </div>
+            </div>
+
+            {/* 5. P&L Waterfall */}
+            <div className="bg-gray-800 rounded-xl p-3">
+              <div className="text-indigo-400 font-bold mb-2 uppercase tracking-wide">📈 Profit & Loss Waterfall</div>
+              {[
+                {label:"Gross Sales Price (ARV)",  value: d.arv,                    indent:false, sign:"+", color:"text-green-300",  bold:false},
+                {label:"− Selling Costs",          value:-r.totalSellCosts,         indent:true,  sign:"",  color:"text-red-300",    bold:false},
+                {label:"= Net Sales Price",        value: r.netSalesPrice,          indent:false, sign:"",  color:"text-green-200",  bold:true,  divider:true},
+                {label:"− Purchase Price",         value:-d.purchasePrice,          indent:true,  sign:"",  color:"text-red-300",    bold:false},
+                {label:"− Buying Closing Costs",   value:-r.totalPurchaseCosts,     indent:true,  sign:"",  color:"text-red-300",    bold:false},
+                {label:"− Rehab Costs",            value:-d.rehabCost,              indent:true,  sign:"",  color:"text-red-300",    bold:false},
+                {label:"− Holding Costs",          value:-r.totalHolding,           indent:true,  sign:"",  color:"text-red-300",    bold:false},
+                {label:"= NET PROFIT",             value: r.netProfit,              indent:false, sign:"",  color:r.netProfit>=0?"text-green-400":"text-red-400", bold:true, divider:true, large:true},
+              ].map(({label,value,indent,color,bold,divider,large})=>(
+                <div key={label} className={`flex justify-between py-1 ${divider?"border-t-2 border-gray-500 mt-1":"border-b border-gray-700/50"}`}>
+                  <span className={`${indent?"ml-4 text-gray-400":"text-gray-200"} ${bold?"font-bold":""}`}>{label}</span>
+                  <span className={`${color} ${bold?"font-bold":""} ${large?"text-sm":""}`}>{fmtD(Math.abs(value))}{value<0&&value!==0?" (cost)":""}</span>
+                </div>
+              ))}
+              <div className="grid grid-cols-3 gap-2 mt-3 pt-2 border-t border-gray-600">
+                {[
+                  ["Total All-In Cost",fmtD(d.arv-r.netProfit),"text-gray-300"],
+                  ["Committed Capital",fmtD(r.totalCommitted),"text-gray-300"],
+                  ["Down Payment",fmtD(r.downPayment),"text-gray-300"],
+                ].map(([l,v,c])=>(
+                  <div key={l} className="bg-gray-700 rounded-lg p-2 text-center">
+                    <div className="text-gray-500 text-xs">{l}</div>
+                    <div className={`font-bold text-sm ${c}`}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
           </div>
+
           {/* Max Offers in Report */}
           <div className="bg-gray-800 rounded-xl p-3 mb-3">
             <div className="text-indigo-400 font-bold mb-2 uppercase tracking-wide">🎯 Highest Offer to Meet All Qualifiers</div>
+            <div className="text-gray-500 text-xs mb-2">Each max offer is back-calculated from ARV minus all costs except purchase price, solving for the price that exactly hits each threshold.</div>
             <div className="grid grid-cols-3 gap-2 mb-2">
-              {[["For $40K Profit",r.maxPP_40k,r.maxPP_40k===r.bindingMaxPP],["For 7.5% ROI",r.maxPP_75,r.maxPP_75===r.bindingMaxPP],["For $25/sqft",r.maxPP_25sqft,r.maxPP_25sqft===r.bindingMaxPP]].map(([l,v,binding])=>(
+              {[
+                ["For $40K Net Profit","ARV − costs − $40K",r.maxPP_40k,r.maxPP_40k===r.bindingMaxPP],
+                ["For 7.5% ROI","ARV × (1−7.5%) − costs",r.maxPP_75,r.maxPP_75===r.bindingMaxPP],
+                ["For $25/sqft","ARV − costs − (25×sqft)",r.maxPP_25sqft,r.maxPP_25sqft===r.bindingMaxPP],
+              ].map(([l,basis,v,binding])=>(
                 <div key={l} className={`rounded-lg p-2 border ${binding?"border-orange-500 bg-orange-900":"border-gray-600 bg-gray-700"}`}>
                   <div className="text-gray-400">{l}</div>
-                  <div className={`font-bold ${binding?"text-orange-300":"text-yellow-300"}`}>{v>0?fmtD(v):"N/A"}</div>
-                  {binding&&<div className="text-orange-400 text-xs">⬅ Most restrictive</div>}
+                  <div className="text-gray-600 italic text-xs">{basis}</div>
+                  <div className={`font-bold mt-0.5 ${binding?"text-orange-300":"text-yellow-300"}`}>{v>0?fmtD(v):"N/A"}</div>
+                  {binding&&<div className="text-orange-400 text-xs mt-0.5">⬅ Most restrictive</div>}
                 </div>
               ))}
             </div>
             <div className="bg-gray-700 rounded-lg p-2 flex justify-between items-center">
-              <span className="text-gray-400">✅ Recommended Max Offer</span>
+              <span className="text-gray-400">✅ Recommended Max Offer <span className="text-gray-600 italic">(lowest of three)</span></span>
               <span className="font-bold text-green-400">{r.bindingMaxPP>0?fmtD(r.bindingMaxPP):"Does not pencil"}</span>
             </div>
           </div>
@@ -287,16 +440,32 @@
         a.download=`deal-${d.address||"analysis"}.csv`;a.click();
       };
 
+      const [parseError,setParseError]=React.useState("");
+      const [apiStatus,setApiStatus]=React.useState(null); // null=unchecked, true=ok, string=error
+
+      React.useEffect(()=>{
+        fetch("/api/health").then(r=>r.json()).then(d=>{
+          setApiStatus(d.ok?true:("API Error: "+(d.error||"Unknown")));
+        }).catch(e=>setApiStatus("Cannot reach server: "+e.message));
+      },[]);
+
       const smartParse=useCallback(async()=>{
         if(!pasteText.trim())return;
         setParsing(true);
+        setParseError("");
+        let rawText="";
         try{
-          const text=await callAPI([{role:"user",content:`Extract data from this wholesale real estate listing and return ONLY a raw JSON object. No markdown, no backticks, no explanation — just the JSON.\n\nLISTING:\n${pasteText}\n\nReturn this exact JSON structure:\n{"address":"","state":"","zip":"","neighborhood":"","propType":"Single family rehab","beds":"","baths":"","garage":"","yearBuilt":"","purchasePrice":0,"sqft":0,"arv":0,"asisValue":0,"wholesaleValue":0,"rehabCost":0,"holdMonths":6,"firstMortgagePct":80,"firstMortgageRate":11,"originationCost":0,"propertyTaxes":0,"rehabNotes":"","arvNotes":"","riskNotes":"","verdict":"","counterOffer":"","comps":[]}\n\nRules:\n- purchasePrice = cash asking price as a number\n- sqft = estimate from beds/baths/era if not stated\n- arv = market estimate after full rehab\n- asisValue = typically 5-15% above purchasePrice\n- originationCost = purchasePrice * 0.025\n- propertyTaxes = local annual estimate / 2\n- rehabNotes = line-item rehab breakdown\n- arvNotes = 2-3 sentences explaining ARV\n- riskNotes = top 3 risks numbered\n- comps = [{"address":"","beds":"","baths":"","sqft":0,"salePrice":0,"pricePerSqft":0,"soldDate":"","notes":""}]`}]);
-          const clean=text.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
-          const parsed=JSON.parse(clean);
+          rawText=await callAPI([{role:"user",content:`Extract data from this wholesale real estate listing and return ONLY a raw JSON object. No markdown, no backticks, no explanation — just the JSON.\n\nLISTING:\n${pasteText}\n\nReturn this exact JSON structure:\n{"address":"","state":"","zip":"","neighborhood":"","propType":"Single family rehab","beds":"","baths":"","garage":"","yearBuilt":"","purchasePrice":0,"sqft":0,"arv":0,"asisValue":0,"wholesaleValue":0,"rehabCost":0,"holdMonths":6,"firstMortgagePct":80,"firstMortgageRate":11,"originationCost":0,"propertyTaxes":0,"rehabNotes":"","arvNotes":"","riskNotes":"","verdict":"","counterOffer":"","comps":[]}\n\nRules:\n- purchasePrice = cash asking price as a number\n- sqft = estimate from beds/baths/era if not stated\n- arv = market estimate after full rehab\n- asisValue = typically 5-15% above purchasePrice\n- originationCost = purchasePrice * 0.025\n- propertyTaxes = local annual estimate / 2\n- rehabNotes = line-item rehab breakdown\n- arvNotes = 2-3 sentences explaining ARV\n- riskNotes = top 3 risks numbered\n- comps = [{"address":"","beds":"","baths":"","sqft":0,"salePrice":0,"pricePerSqft":0,"soldDate":"","notes":""}]`}]);
+          // Strip markdown fences anywhere in response, then grab first JSON object
+          const clean=rawText.replace(/```(?:json)?/gi,"").trim();
+          const match=clean.match(/\{[\s\S]*\}/);
+          if(!match) throw new Error("No JSON object found in API response.");
+          const parsed=JSON.parse(match[0]);
           setD(p=>({...p,...parsed,comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
           setTab("📊 Analysis");
-        }catch(e){alert(`Smart Analysis error: ${e.message}`);}
+        }catch(e){
+          setParseError("❌ "+e.message+(rawText?"\n\nRaw response snippet:\n"+rawText.slice(0,400):""));
+        }
         setParsing(false);
       },[pasteText]);
 
@@ -381,6 +550,9 @@
                     <div className="bg-gray-800 rounded-xl p-4">
                       <h2 className="text-sm font-bold text-indigo-400 mb-1">📋 Smart Analysis</h2>
                       <p className="text-xs text-gray-400 mb-3">Paste any wholesale listing below. We'll extract all fields and estimate ARV + rehab costs automatically.</p>
+                      {apiStatus===true&&<div className="mb-2 text-xs text-green-400 bg-green-950 border border-green-800 rounded-lg px-3 py-1.5">✅ API connected and ready</div>}
+                      {typeof apiStatus==="string"&&<div className="mb-2 text-xs text-red-300 bg-red-950 border border-red-800 rounded-lg px-3 py-1.5">⚠️ {apiStatus} — check your ANTHROPIC_API_KEY in Railway environment variables.</div>}
+                      {apiStatus===null&&<div className="mb-2 text-xs text-gray-500 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5">🔌 Checking API connection...</div>}
                       <textarea className={inp+" h-48 resize-none"} value={pasteText} onChange={e=>setPasteText(e.target.value)}
                         placeholder={"Example:\n\nDenver, CO 80236\nOff-Market! Brick ranch in Harvey Park South. Needs cosmetics, roof, windows.\nBedrooms: 3  Bathrooms: 2.5  Garage: Attached  Year Built: 1957  Cash Price: $439,900"}/>
                       <button onClick={smartParse} disabled={parsing||!pasteText.trim()} className="mt-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg text-sm font-medium w-full">
@@ -388,6 +560,13 @@
                       </button>
                     </div>
                     {parsing&&<div className="bg-gray-800 rounded-xl p-6 text-center text-gray-400 text-sm">🔍 Extracting fields, estimating ARV and rehab costs...</div>}
+                    {parseError&&(
+                      <div className="bg-red-950 border border-red-700 rounded-xl p-4 text-xs text-red-300 whitespace-pre-wrap font-mono">
+                        <div className="font-bold text-red-400 mb-1 font-sans">Smart Analysis Error</div>
+                        {parseError}
+                        <button onClick={()=>setParseError("")} className="mt-3 text-red-500 hover:text-red-300 underline block font-sans">Dismiss</button>
+                      </div>
+                    )}
                     <div className="bg-gray-700 rounded-xl p-4 text-xs text-gray-300">
                       <div className="font-semibold text-white mb-1">What gets auto-filled:</div>
                       Address · Beds/Baths/Garage/Year · Purchase Price · ARV estimate · Rehab cost estimate · Rehab notes · Comp reasoning · Risks · Counter-offer suggestion

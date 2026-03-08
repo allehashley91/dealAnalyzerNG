@@ -32,7 +32,16 @@
     const fmtD   = (n,d=0) => isNaN(n)||!isFinite(n)?"-":"$"+fmt(n,d);
     const clamp  = n => (isNaN(n)||!isFinite(n))?0:n;
 
-    const TABS = ["📋 Smart Analysis","⚙️ Inputs","📊 Analysis","💬 Advisor","📁 History"];
+    const TABS = ["📋 Smart Analysis","⚙️ Inputs","📊 Analysis","🗣️ Talk to Marco","📁 History"];
+
+    const VOICE_PROFILES = {
+      mentor: {
+        label: "Marco",
+        desc: "Your deal advisor. Explains the reasoning behind every number and recommendation.",
+        persona: "Your name is Marco. You are a patient, knowledgeable real estate mentor and deal advisor who loves teaching and guiding investors. You explain every recommendation clearly, walk through the math step by step, and make sure the reader understands not just what to do but why. You're supportive but honest — if a deal doesn't work, you say so plainly and explain exactly why.",
+        style: "After each conclusion, briefly explain the reasoning behind it. Define any industry terms used. Use plain, conversational language. Structure your response so any team member could follow along and learn from it. Sign off responses as Marco.",
+      },
+    };
 
     const DEF = {
       address:"",date:new Date().toISOString().slice(0,10),propType:"Single family rehab",
@@ -147,6 +156,62 @@
       const text=data?.content?.filter(b=>b.type==="text").map(b=>b.text).join("\n").trim();
       if(!text) throw new Error("Empty response");
       return text;
+    }
+
+
+    function CompsTable({comps, arv, subject}) {
+      if(!comps||comps.length===0) return null;
+      const avgPsf = comps.reduce((s,c)=>s+(c.pricePerSqft||0),0)/comps.length;
+      const avgPrice = comps.reduce((s,c)=>s+(c.salePrice||0),0)/comps.length;
+      return (
+        <div>
+          {/* Card grid */}
+          <div className="grid grid-cols-1 gap-2 mb-3">
+            {comps.map((c,i)=>{
+              const psf = c.pricePerSqft || (c.sqft&&c.salePrice ? Math.round(c.salePrice/c.sqft) : 0);
+              const vsPsf = subject?.sqft ? psf - (arv/subject.sqft) : null;
+              return (
+                <div key={i} className="bg-gray-700 rounded-lg p-3 border border-gray-600">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="text-white font-semibold text-xs leading-tight">{c.address||`Comp #${i+1}`}</div>
+                    <div className="text-green-400 font-bold text-sm whitespace-nowrap">{fmtD(c.salePrice)}</div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="bg-gray-800 rounded p-1.5 text-center">
+                      <div className="text-gray-500 text-xs">Beds</div>
+                      <div className="text-white font-bold">{c.beds||"—"}</div>
+                    </div>
+                    <div className="bg-gray-800 rounded p-1.5 text-center">
+                      <div className="text-gray-500 text-xs">Baths</div>
+                      <div className="text-white font-bold">{c.baths||"—"}</div>
+                    </div>
+                    <div className="bg-gray-800 rounded p-1.5 text-center">
+                      <div className="text-gray-500 text-xs">Sq Ft</div>
+                      <div className="text-white font-bold">{c.sqft?c.sqft.toLocaleString():"—"}</div>
+                    </div>
+                    <div className="bg-gray-800 rounded p-1.5 text-center">
+                      <div className="text-gray-500 text-xs">$/sqft</div>
+                      <div className="text-yellow-300 font-bold">${psf||"—"}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-600 text-xs">
+                    <span className="text-gray-400">📅 Sold: <span className="text-gray-300">{c.soldDate||"Unknown"}</span></span>
+                    {vsPsf!==null&&<span className={`font-medium ${vsPsf>=0?"text-green-400":"text-red-400"}`}>{vsPsf>=0?"+":""}{vsPsf.toFixed(0)}/sqft vs ARV</span>}
+                  </div>
+                  {c.notes&&<div className="mt-1.5 text-gray-400 italic text-xs">{c.notes}</div>}
+                </div>
+              );
+            })}
+          </div>
+          {/* Summary averages bar */}
+          <div className="bg-gray-900 rounded-lg p-2.5 flex flex-wrap gap-4 text-xs">
+            <div><span className="text-gray-500">Avg Sale Price </span><span className="text-green-300 font-bold">{fmtD(avgPrice)}</span></div>
+            <div><span className="text-gray-500">Avg $/sqft </span><span className="text-yellow-300 font-bold">${avgPsf.toFixed(0)}/ft²</span></div>
+            <div><span className="text-gray-500">ARV </span><span className="text-indigo-300 font-bold">{fmtD(arv)}</span></div>
+            <div><span className="text-gray-500"># Comps </span><span className="text-white font-bold">{comps.length}</span></div>
+          </div>
+        </div>
+      );
     }
 
     function ReportView({d,r}) {
@@ -366,22 +431,8 @@
           </div>
           {d.comps?.length>0&&(
             <div className="bg-gray-800 rounded-xl p-3 mb-3">
-              <div className="text-blue-400 font-bold mb-2 uppercase tracking-wide">🏘️ Comparable Sales</div>
-              <table className="w-full text-xs">
-                <thead><tr className="text-gray-500 border-b border-gray-700">
-                  {["Address","Bed/Bath","Sqft","Sale Price","$/sqft","Sold"].map(h=><th key={h} className="text-left pb-1 pr-2">{h}</th>)}
-                </tr></thead>
-                <tbody>{d.comps.map((c,i)=>(
-                  <tr key={i} className="border-b border-gray-700">
-                    <td className="py-1 pr-2 text-white">{c.address}</td>
-                    <td className="py-1 pr-2 text-gray-300">{c.beds}bd/{c.baths}ba</td>
-                    <td className="py-1 pr-2 text-gray-300">{c.sqft?.toLocaleString()}</td>
-                    <td className="py-1 pr-2 text-green-400 font-bold">{fmtD(c.salePrice)}</td>
-                    <td className="py-1 pr-2 text-gray-300">${c.pricePerSqft}/ft²</td>
-                    <td className="py-1 text-gray-400">{c.soldDate}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
+              <div className="text-blue-400 font-bold mb-3 uppercase tracking-wide">🏘️ Recently Sold Comparable Properties</div>
+              <CompsTable comps={d.comps} arv={d.arv} subject={d}/>
             </div>
           )}
           <div className="grid grid-cols-2 gap-3 mb-3">
@@ -479,7 +530,36 @@
         let messages;
         if(!isFollowUp){
           const ctx=buildContext();
-          const prompt=`You are an expert fix-and-flip real estate investment advisor. ${ctx}\n\n${aiQuestion?`QUESTION TO ANSWER FIRST: ${aiQuestion}\n\nAnswer the above question directly before the rest of the analysis.\n\n`:""}\nProvide your response in these sections:\n\nDEAL ASSESSMENT\nOverall verdict — is this worth pursuing and why?\n\nKEY RISKS\nTop 3 risks, numbered.\n\nNEGOTIATION & COUNTER-OFFER\nSpecific price recommendation with dollar-figure justification.\n\nSELLER TALKING POINTS\n5–7 specific, persuasive talking points to justify the counter-offer in a conversation with the seller.\n\nWHOLESALE FLAGS\nAssignment fee concerns, contract issues, or double-close considerations.\n\nACTION ITEMS\n3 specific next steps.\n\nFOLLOW-UP QUESTIONS\n2–3 questions that would sharpen this analysis if answered.`;
+          const vp=VOICE_PROFILES["mentor"];
+          const prompt=`${vp.persona}
+
+COMMUNICATION STYLE: ${vp.style}
+
+${ctx}
+
+${aiQuestion?`QUESTION TO ANSWER FIRST: ${aiQuestion}\n\nAnswer the above question directly before the rest of the analysis.\n\n`:""}
+Provide your response in these sections:
+
+DEAL ASSESSMENT
+Overall verdict — is this worth pursuing and why?
+
+KEY RISKS
+Top 3 risks, numbered.
+
+NEGOTIATION & COUNTER-OFFER
+Specific price recommendation with dollar-figure justification.
+
+SELLER TALKING POINTS
+5–7 specific, persuasive talking points to justify the counter-offer in a conversation with the seller.
+
+WHOLESALE FLAGS
+Assignment fee concerns, contract issues, or double-close considerations.
+
+ACTION ITEMS
+3 specific next steps.
+
+FOLLOW-UP QUESTIONS
+2–3 questions that would sharpen this analysis if answered.`;
           messages=[{role:"user",content:prompt}];
           setAiMessages(messages);
         }else{
@@ -609,6 +689,71 @@
                       <F label="Origination Costs ($)"><input type="number" className={inp} value={d.originationCost||""} onChange={e=>num("originationCost",e.target.value)}/></F>
                     </div>
                   </div>
+
+                  {/* Manual Comps Editor */}
+                  <div className="bg-gray-800 rounded-xl p-4 mt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-xs font-semibold text-indigo-400 uppercase">🏘️ Comparable Sales</h2>
+                      <button onClick={()=>setD(p=>({...p,comps:[...p.comps,{address:"",beds:"",baths:"",sqft:0,salePrice:0,pricePerSqft:0,soldDate:"",notes:""}]}))}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1 rounded-lg">+ Add Comp</button>
+                    </div>
+                    {d.comps.length===0&&(
+                      <div className="text-center text-gray-500 text-xs py-4 border border-dashed border-gray-600 rounded-lg">
+                        No comps yet. Click "+ Add Comp" to add manually, or run Smart Analysis to auto-fill.
+                      </div>
+                    )}
+                    {d.comps.map((c,i)=>(
+                      <div key={i} className="border border-gray-700 rounded-lg p-3 mb-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-gray-400 font-semibold">Comp #{i+1}</span>
+                          <button onClick={()=>setD(p=>({...p,comps:p.comps.filter((_,j)=>j!==i)}))}
+                            className="text-xs text-red-500 hover:text-red-300">✕ Remove</button>
+                        </div>
+                        <div className="mb-2">
+                          <label className="block text-xs text-gray-500 mb-1">Address</label>
+                          <input className={inp} value={c.address} placeholder="123 Elm St, City, ST"
+                            onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,address:e.target.value}:x)}))}/>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Beds</label>
+                            <input className={inp} value={c.beds} placeholder="3"
+                              onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,beds:e.target.value}:x)}))}/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Baths</label>
+                            <input className={inp} value={c.baths} placeholder="2"
+                              onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,baths:e.target.value}:x)}))}/>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Sq Ft</label>
+                            <input type="number" className={inp} value={c.sqft||""} placeholder="1800"
+                              onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,sqft:parseFloat(e.target.value)||0,pricePerSqft:x.salePrice&&e.target.value?Math.round(x.salePrice/(parseFloat(e.target.value)||1)):x.pricePerSqft}:x)}))}/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Sale Price ($)</label>
+                            <input type="number" className={inp} value={c.salePrice||""} placeholder="450000"
+                              onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,salePrice:parseFloat(e.target.value)||0,pricePerSqft:x.sqft&&e.target.value?Math.round((parseFloat(e.target.value)||0)/x.sqft):x.pricePerSqft}:x)}))}/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Date Sold</label>
+                            <input className={inp} value={c.soldDate} placeholder="Jan 2025"
+                              onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,soldDate:e.target.value}:x)}))}/>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Notes <span className="text-gray-600">(optional)</span></label>
+                          <input className={inp} value={c.notes} placeholder="Updated kitchen, similar layout"
+                            onChange={e=>setD(p=>({...p,comps:p.comps.map((x,j)=>j===i?{...x,notes:e.target.value}:x)}))}/>
+                        </div>
+                        {c.sqft>0&&c.salePrice>0&&(
+                          <div className="mt-2 text-xs text-yellow-300">Calculated: ${Math.round(c.salePrice/c.sqft)}/sqft</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
 
                 {/* ANALYSIS */}
@@ -650,29 +795,13 @@
                     {/* Comps */}
                     {d.comps?.length>0&&(
                       <div className="bg-gray-800 rounded-xl p-3">
-                        <div className="text-xs font-semibold text-indigo-400 mb-2 uppercase">🏘️ Comparable Sales — ARV Basis</div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead><tr className="text-gray-500 border-b border-gray-700">
-                              {["Address","Bed/Bath","Sqft","Sale Price","$/sqft","Sold","Notes"].map(h=><th key={h} className="text-left pb-1 pr-3">{h}</th>)}
-                            </tr></thead>
-                            <tbody>{d.comps.map((c,i)=>(
-                              <tr key={i} className="border-b border-gray-700">
-                                <td className="py-1 pr-3 text-white font-medium">{c.address}</td>
-                                <td className="py-1 pr-3 text-center text-gray-300">{c.beds}bd/{c.baths}ba</td>
-                                <td className="py-1 pr-3 text-right text-gray-300">{c.sqft?.toLocaleString()}</td>
-                                <td className="py-1 pr-3 text-right text-green-400 font-bold">{fmtD(c.salePrice)}</td>
-                                <td className="py-1 pr-3 text-right text-gray-300">${c.pricePerSqft}/ft²</td>
-                                <td className="py-1 pr-3 text-right text-gray-400">{c.soldDate}</td>
-                                <td className="py-1 text-gray-400 italic">{c.notes}</td>
-                              </tr>
-                            ))}</tbody>
-                            <tfoot><tr className="text-indigo-300 text-xs">
-                              <td colSpan={3} className="pt-2">Avg $/sqft:</td>
-                              <td colSpan={4} className="pt-2 text-right font-bold">${(d.comps.reduce((s,c)=>s+(c.pricePerSqft||0),0)/d.comps.length).toFixed(0)}/ft² · ARV set at {fmtD(d.arv)}</td>
-                            </tr></tfoot>
-                          </table>
-                        </div>
+                        <div className="text-xs font-semibold text-indigo-400 mb-3 uppercase">🏘️ Recently Sold Comparable Properties</div>
+                        <CompsTable comps={d.comps} arv={d.arv} subject={d}/>
+                      </div>
+                    )}
+                    {d.comps?.length===0&&d.arv>0&&(
+                      <div className="bg-gray-800 rounded-xl p-3 border border-dashed border-gray-600 text-center">
+                        <div className="text-gray-500 text-xs">No comps loaded — run Smart Analysis or add them manually in Inputs.</div>
                       </div>
                     )}
 
@@ -714,15 +843,25 @@
                 )}
 
                 {/* ADVISOR */}
-                {tab==="💬 Advisor"&&(
+                {tab==="🗣️ Talk to Marco"&&(
                   <div className="space-y-4">
+                    {/* Marco identity card */}
+                    <div className="bg-indigo-950 border border-indigo-800 rounded-xl p-4 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-lg font-bold flex-shrink-0">M</div>
+                      <div>
+                        <div className="text-sm font-bold text-white">Marco</div>
+                        <div className="text-xs text-indigo-300">Your deal advisor — walks through every number and explains the reasoning behind each recommendation.</div>
+                      </div>
+                    </div>
+
                     {aiMessages.length===0&&(
                       <div className="bg-gray-800 rounded-xl p-4">
-                        <h2 className="text-sm font-semibold text-indigo-400 mb-2">💬 Deal Advisor</h2>
-                        <p className="text-xs text-gray-400 mb-3">Full deal context is loaded. The advisor will analyze the deal, flag risks, suggest a counter-offer, provide seller talking points, and ask follow-up questions.</p>
-                        <textarea className={inp+" h-16 resize-none"} placeholder='e.g. "What if we added a bedroom and bath in the basement?"' value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)}/>
+                        <h2 className="text-sm font-semibold text-indigo-400 mb-2">💬 Ask Marco</h2>
+                        <p className="text-xs text-gray-400 mb-1">Full deal context is loaded. The advisor will analyze the deal, flag risks, suggest a counter-offer, provide seller talking points, and ask follow-up questions.</p>
+
+                        <textarea className={inp+" h-16 resize-none"} placeholder='e.g. "Marco, what if we added a bedroom and bath in the basement?"' value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)}/>
                         <button onClick={()=>askAI(false)} disabled={aiLoading||d.arv===0} className="mt-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg text-sm font-medium w-full">
-                          {aiLoading?"Analyzing...":"💬 Analyze This Deal"}
+                          {aiLoading?"Marco is reviewing...":"💬 Ask Marco to Analyze This Deal"}
                         </button>
                         {d.arv===0&&<div className="text-yellow-400 text-xs mt-2">⚠️ Load a property first via Smart Analysis or Inputs.</div>}
                       </div>
@@ -730,7 +869,10 @@
                     {aiMessages.length>0&&(
                       <div className="space-y-3">
                         <div className="flex justify-between items-center">
-                          <div className="text-xs font-semibold text-indigo-400 uppercase">Deal Advisor</div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold">M</div>
+                            <div className="text-xs font-semibold text-indigo-400">Marco</div>
+                          </div>
                           <button onClick={()=>{setAiMessages([]);setAiQuestion("");}} className="text-xs text-gray-500 hover:text-red-400">↺ Start Over</button>
                         </div>
                         {aiMessages.filter(m=>m.role==="assistant").map((m,i)=>(

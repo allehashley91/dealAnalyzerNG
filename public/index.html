@@ -656,6 +656,7 @@ FOLLOW-UP QUESTIONS
 
                 {/* INPUTS */}
                 {tab==="⚙️ Inputs"&&(
+                  <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-gray-800 rounded-xl p-4">
                       <h2 className="text-xs font-semibold text-indigo-400 mb-3 uppercase">Property Info</h2>
@@ -754,6 +755,7 @@ FOLLOW-UP QUESTIONS
                       </div>
                     ))}
                   </div>
+                  </div>
                 )}
 
                 {/* ANALYSIS */}
@@ -850,7 +852,7 @@ FOLLOW-UP QUESTIONS
                       <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-lg font-bold flex-shrink-0">M</div>
                       <div>
                         <div className="text-sm font-bold text-white">Marco</div>
-                        <div className="text-xs text-indigo-300">Your deal advisor — walks through every number and explains the reasoning behind each recommendation.</div>
+                        <div className="text-xs text-indigo-300">Answers your questions, walks through numbers, and explains the reasoning behind each recommendation.</div>
                       </div>
                     </div>
 
@@ -859,7 +861,7 @@ FOLLOW-UP QUESTIONS
                         <h2 className="text-sm font-semibold text-indigo-400 mb-2">💬 Ask Marco</h2>
                         <p className="text-xs text-gray-400 mb-1">Full deal context is loaded. The advisor will analyze the deal, flag risks, suggest a counter-offer, provide seller talking points, and ask follow-up questions.</p>
 
-                        <textarea className={inp+" h-16 resize-none"} placeholder='e.g. "Marco, what if we added a bedroom and bath in the basement?"' value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)}/>
+                        <textarea className={inp+" h-16 resize-none"} placeholder='e.g. "Marco, what if we added a bedroom and bath in the basement? Would it be worthwhile to counteroffer this much?"' value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)}/>
                         <button onClick={()=>askAI(false)} disabled={aiLoading||d.arv===0} className="mt-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg text-sm font-medium w-full">
                           {aiLoading?"Marco is reviewing...":"💬 Ask Marco to Analyze This Deal"}
                         </button>

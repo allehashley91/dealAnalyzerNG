@@ -161,68 +161,38 @@
 
     function CompsTable({comps, arv, subject}) {
       if(!comps||comps.length===0) return null;
-      const avgPsf   = comps.reduce((s,c)=>s+(c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0)),0)/comps.length;
-      const avgPrice = comps.reduce((s,c)=>s+(c.salePrice||0),0)/comps.length;
-      const subPsf   = subject?.sqft&&arv ? arv/subject.sqft : null;
+      const avgPsf = comps.reduce((s,c)=>s+(c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0)),0)/comps.length;
       return (
-        <div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-gray-500 border-b border-gray-700">
-                  <th className="text-left pb-2 pr-3 font-medium">Address</th>
-                  <th className="text-center pb-2 pr-3 font-medium">Bed/Bath</th>
-                  <th className="text-right pb-2 pr-3 font-medium">Sq Ft</th>
-                  <th className="text-right pb-2 pr-3 font-medium">Sale Price</th>
-                  <th className="text-right pb-2 pr-3 font-medium">$/sqft</th>
-                  <th className="text-right pb-2 pr-3 font-medium">Sold</th>
-                  <th className="text-right pb-2 font-medium">vs ARV</th>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="text-gray-500 border-b border-gray-700">
+              {["Address","Bed/Bath","Sqft","Sale Price","$/sqft","Sold","Notes"].map(h=>(
+                <th key={h} className="text-left pb-1 pr-3 font-medium">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>{comps.map((c,i)=>{
+              const psf=c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);
+              return (
+                <tr key={i} className="border-b border-gray-700">
+                  <td className="py-1 pr-3 text-white font-medium">{c.address||`Comp #${i+1}`}</td>
+                  <td className="py-1 pr-3 text-gray-300">{c.beds||"—"}bd/{c.baths||"—"}ba</td>
+                  <td className="py-1 pr-3 text-right text-gray-300">{c.sqft?c.sqft.toLocaleString():"—"}</td>
+                  <td className="py-1 pr-3 text-right text-green-400 font-bold">{fmtD(c.salePrice)}</td>
+                  <td className="py-1 pr-3 text-right text-gray-300">${psf||"—"}/ft²</td>
+                  <td className="py-1 pr-3 text-right text-gray-400">{c.soldDate||"—"}</td>
+                  <td className="py-1 text-gray-400 italic">{c.notes||""}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {/* Subject property row */}
-                {subject&&subject.sqft>0&&(
-                  <tr className="border-b border-indigo-800 bg-indigo-950">
-                    <td className="py-1.5 pr-3 text-indigo-300 font-semibold">{subject.address||"Subject Property"} <span className="text-indigo-500 text-xs">(subject)</span></td>
-                    <td className="py-1.5 pr-3 text-center text-indigo-300">{subject.beds&&subject.baths?`${subject.beds}bd/${subject.baths}ba`:"—"}</td>
-                    <td className="py-1.5 pr-3 text-right text-indigo-300">{subject.sqft?subject.sqft.toLocaleString():"—"}</td>
-                    <td className="py-1.5 pr-3 text-right text-indigo-300 font-bold">{fmtD(arv)} <span className="text-indigo-500 font-normal">(ARV)</span></td>
-                    <td className="py-1.5 pr-3 text-right text-indigo-300 font-bold">{subPsf?"$"+subPsf.toFixed(0)+"/ft²":"—"}</td>
-                    <td className="py-1.5 pr-3 text-right text-indigo-500">—</td>
-                    <td className="py-1.5 text-right text-indigo-500">—</td>
-                  </tr>
-                )}
-                {comps.map((c,i)=>{
-                  const psf = c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);
-                  const delta = subPsf&&psf ? psf-subPsf : null;
-                  return (
-                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                      <td className="py-1.5 pr-3 text-white font-medium">{c.address||`Comp #${i+1}`}{c.notes&&<div className="text-gray-500 italic font-normal">{c.notes}</div>}</td>
-                      <td className="py-1.5 pr-3 text-center text-gray-300">{c.beds||"—"}bd/{c.baths||"—"}ba</td>
-                      <td className="py-1.5 pr-3 text-right text-gray-300">{c.sqft?c.sqft.toLocaleString():"—"}</td>
-                      <td className="py-1.5 pr-3 text-right text-green-400 font-bold">{fmtD(c.salePrice)}</td>
-                      <td className="py-1.5 pr-3 text-right text-yellow-300">{psf?"$"+psf+"/ft²":"—"}</td>
-                      <td className="py-1.5 pr-3 text-right text-gray-400">{c.soldDate||"—"}</td>
-                      <td className={`py-1.5 text-right font-semibold ${delta===null?"text-gray-600":delta>=0?"text-green-400":"text-red-400"}`}>
-                        {delta===null?"—":(delta>=0?"+":"")+delta.toFixed(0)+"/ft²"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-gray-600 text-gray-400 font-semibold">
-                  <td colSpan={3} className="pt-2 text-gray-500">{comps.length} comp{comps.length!==1?"s":""} · avg</td>
-                  <td className="pt-2 text-right text-green-300">{fmtD(avgPrice)}</td>
-                  <td className="pt-2 text-right text-yellow-300">${avgPsf.toFixed(0)}/ft²</td>
-                  <td colSpan={2} className="pt-2 text-right text-indigo-300">ARV {fmtD(arv)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+              );
+            })}</tbody>
+            <tfoot><tr className="text-indigo-300 text-xs">
+              <td colSpan={3} className="pt-2 text-gray-500">Avg $/sqft:</td>
+              <td colSpan={4} className="pt-2 text-right font-bold">${avgPsf.toFixed(0)}/ft² · ARV set at {fmtD(arv)}</td>
+            </tr></tfoot>
+          </table>
         </div>
       );
     }
+
 
     function ReportView({d,r,arvAnalysis}) {
       const sc=(ok)=>ok?"text-green-400":"text-red-400";
@@ -441,8 +411,25 @@
           </div>
           {d.comps?.length>0&&(
             <div className="bg-gray-800 rounded-xl p-3 mb-3">
-              <div className="text-blue-400 font-bold mb-3 uppercase tracking-wide">🏘️ Recently Sold Comparable Properties</div>
-              <CompsTable comps={d.comps} arv={d.arv} subject={d}/>
+              <div className="text-blue-400 font-bold mb-2 uppercase tracking-wide">🏘️ Comparable Sales</div>
+              <table className="w-full text-xs">
+                <thead><tr className="text-gray-500 border-b border-gray-700">
+                  {["Address","Bed/Bath","Sqft","Sale Price","$/sqft","Sold"].map(h=><th key={h} className="text-left pb-1 pr-2 font-medium">{h}</th>)}
+                </tr></thead>
+                <tbody>{d.comps.map((c,i)=>{
+                  const psf=c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);
+                  return (
+                    <tr key={i} className="border-b border-gray-700">
+                      <td className="py-1 pr-2 text-white">{c.address}</td>
+                      <td className="py-1 pr-2 text-gray-300">{c.beds}bd/{c.baths}ba</td>
+                      <td className="py-1 pr-2 text-right text-gray-300">{c.sqft?.toLocaleString()}</td>
+                      <td className="py-1 pr-2 text-right text-green-400 font-bold">{fmtD(c.salePrice)}</td>
+                      <td className="py-1 pr-2 text-right text-gray-300">${psf}/ft²</td>
+                      <td className="py-1 text-right text-gray-400">{c.soldDate}</td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
             </div>
           )}
 
@@ -574,7 +561,7 @@
         setParseError("");
         let rawText="";
         try{
-          rawText=await callAPI([{role:"user",content:`Extract data from this wholesale real estate listing and return ONLY a raw JSON object. No markdown, no backticks, no explanation — just the JSON.\n\nLISTING:\n${pasteText}\n\nReturn this exact JSON structure:\n{"address":"","state":"","zip":"","neighborhood":"","propType":"Single family rehab","beds":"","baths":"","garage":"","yearBuilt":"","purchasePrice":0,"sqft":0,"arv":0,"asisValue":0,"wholesaleValue":0,"rehabCost":0,"holdMonths":6,"firstMortgagePct":80,"firstMortgageRate":11,"originationCost":0,"propertyTaxes":0,"rehabNotes":"","arvNotes":"","riskNotes":"","verdict":"","counterOffer":"","comps":[]}\n\nRules:\n- purchasePrice = cash asking price as a number\n- sqft = estimate from beds/baths/era if not stated\n- arv = market estimate after full rehab\n- asisValue = typically 5-15% above purchasePrice\n- originationCost = purchasePrice * 0.025\n- propertyTaxes = local annual estimate / 2\n- rehabNotes = line-item rehab breakdown\n- arvNotes = 2-3 sentences explaining ARV\n- riskNotes = top 3 risks numbered\n- comps = [{"address":"","beds":"","baths":"","sqft":0,"salePrice":0,"pricePerSqft":0,"soldDate":"","notes":""}]`}]);
+          rawText=await callAPI([{role:"user",content:`You are a real estate investment analyst. Extract data from this wholesale listing AND generate realistic comparable sales from your knowledge of the area. Return ONLY a raw JSON object — no markdown, no backticks, no explanation.\n\nLISTING:\n${pasteText}\n\nReturn this exact JSON structure:\n{"address":"","state":"","zip":"","neighborhood":"","propType":"Single family rehab","beds":"","baths":"","garage":"","yearBuilt":"","purchasePrice":0,"sqft":0,"arv":0,"asisValue":0,"wholesaleValue":0,"rehabCost":0,"holdMonths":6,"firstMortgagePct":80,"firstMortgageRate":11,"originationCost":0,"propertyTaxes":0,"rehabNotes":"","arvNotes":"","riskNotes":"","verdict":"","counterOffer":"","comps":[]}\n\nRules:\n- purchasePrice = cash asking price as a number\n- sqft = estimate from beds/baths/era if not stated\n- arv = your best market estimate after full rehab, based on location, beds/baths, sqft, and condition\n- asisValue = typically 5-15% above purchasePrice\n- originationCost = purchasePrice * 0.025\n- propertyTaxes = realistic local annual estimate / 2\n- rehabNotes = detailed line-item rehab breakdown based on described condition\n- arvNotes = 2-3 sentences explaining your ARV estimate with reference to comps\n- riskNotes = top 3 risks as a numbered list\n- comps = 3-5 realistic comparable sales from your knowledge of this neighborhood and market. Use actual or representative addresses, realistic sold prices, and dates. Comps can be from the past 1-3 years if recent data is sparse. Each comp: {"address":"","beds":"","baths":"","sqft":0,"salePrice":0,"pricePerSqft":0,"soldDate":"","notes":""}\n- counterOffer = your suggested maximum offer price as a dollar amount`}],1800);
           // Strip markdown fences anywhere in response, then grab first JSON object
           const clean=rawText.replace(/```(?:json)?/gi,"").trim();
           const match=clean.match(/\{[\s\S]*\}/);
@@ -938,26 +925,8 @@ FOLLOW-UP QUESTIONS
                     {/* Comps */}
                     {d.comps?.length>0&&(
                       <div className="bg-gray-800 rounded-xl p-3">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="text-xs font-semibold text-blue-400 uppercase tracking-wide">🏘️ Comparable Sales</div>
-                          <button onClick={()=>setTab("⚙️ Inputs")} className="text-xs text-gray-500 hover:text-indigo-400">✏️ Edit Comps</button>
-                        </div>
+                        <div className="text-xs font-semibold text-indigo-400 mb-2 uppercase">🏘️ Comparable Sales — ARV Basis</div>
                         <CompsTable comps={d.comps} arv={d.arv} subject={d}/>
-                      </div>
-                    )}
-                    {d.comps?.length===0&&d.arv>0&&(
-                      <div className="bg-gray-800 rounded-xl p-3 border border-dashed border-gray-600 text-center py-6">
-                        <div className="text-2xl mb-1">🏘️</div>
-                        <div className="text-gray-400 text-sm font-medium mb-1">No Comparables Loaded</div>
-                        <div className="text-gray-600 text-xs">Run Smart Analysis to auto-populate, or</div>
-                        <button onClick={()=>setTab("⚙️ Inputs")} className="mt-2 text-indigo-400 hover:text-indigo-300 text-xs underline">add comps manually in Inputs →</button>
-                      </div>
-                    )}
-
-                    {/* vs ARV legend */}
-                    {d.comps?.length>0&&d.sqft>0&&(
-                      <div className="text-xs text-gray-600 -mt-2 mb-1 px-1">
-                        <span className="text-green-500">▲ green</span> = comp $/sqft supports ARV · <span className="text-red-500">▼ red</span> = comp $/sqft below ARV
                       </div>
                     )}
 

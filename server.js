@@ -146,14 +146,6 @@ app.post("/api/analyze", async (req, res) => {
   }
 });
 
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`New Growth Deal Analyzer running on port ${PORT}`);
-});
-
 // ─── ATTOM Integration ────────────────────────────────────────────────────────
 const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
 
@@ -298,4 +290,13 @@ app.get("/api/attom/status", (req, res) => {
     keyLength: key ? key.length : 0,
     keyPrefix: key ? key.slice(0,4)+"…" : null,
   });
+});
+
+// ─── Catch-all + Server Start (must be last) ──────────────────────────────────
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`New Growth Deal Analyzer running on port ${PORT}`);
 });

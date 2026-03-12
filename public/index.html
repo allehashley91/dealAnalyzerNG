@@ -525,8 +525,10 @@
             </div>
             <div className="bg-gray-800 rounded-xl p-3">
               <div className="text-green-400 font-bold mb-2 uppercase tracking-wide">📋 Verdict</div>
-              <div className="flex items-center gap-2 mb-2"><VBadge v={r.verdict}/></div>
-              {d.counterOffer&&<div className="text-yellow-300 mb-1">Counter: {d.counterOffer}</div>}
+              <div className="flex items-center justify-between mb-2">
+                <VBadge v={r.verdict}/>
+                {r.bindingMaxPP>0&&<div className="text-sm font-semibold"><span className="text-gray-400">{r.bindingMaxPP<d.purchasePrice?"Counter: ":"Max Offer: "}</span><span className={r.bindingMaxPP<d.purchasePrice?"text-orange-400 font-bold":"text-green-400 font-bold"}>{fmtD(r.bindingMaxPP)}</span></div>}
+              </div>
               <div className="text-gray-300 whitespace-pre-wrap leading-relaxed">{d.verdict||"Run Advisor for full verdict."}</div>
             </div>
           </div>

@@ -155,10 +155,10 @@ app.listen(PORT, "0.0.0.0", () => {
 });
 
 // ─── ATTOM Integration ────────────────────────────────────────────────────────
-const ATTOM_KEY = process.env.ATTOM_API_KEY;
 const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
 
 async function attomGet(path, params) {
+  const ATTOM_KEY = process.env.ATTOM_API_KEY; // read live every call
   if (!ATTOM_KEY) throw new Error("ATTOM_API_KEY not set in environment");
   const url = new URL(ATTOM_BASE + path);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
@@ -291,5 +291,11 @@ app.post("/api/attom/lookup", async (req, res) => {
 
 // GET /api/attom/status — lets frontend check if key is configured
 app.get("/api/attom/status", (req, res) => {
-  res.json({ configured: !!ATTOM_KEY });
+  // Re-read at request time so we catch keys added after startup
+  const key = process.env.ATTOM_API_KEY;
+  res.json({
+    configured: !!key,
+    keyLength: key ? key.length : 0,
+    keyPrefix: key ? key.slice(0,4)+"…" : null,
+  });
 });

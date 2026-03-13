@@ -198,8 +198,8 @@ app.post("/api/attom/lookup", async (req, res) => {
       const lot = prop.lot || {};
       const sum = prop.summary || {};
       attomId   = prop.identifier?.attomId;
-      latitude  = prop.location?.latitude;
-      longitude = prop.location?.longitude;
+      latitude  = parseFloat(prop.location?.latitude);
+      longitude = parseFloat(prop.location?.longitude);
       result.property = {
         attomId,
         beds:      b.rooms?.beds,
@@ -219,12 +219,10 @@ app.post("/api/attom/lookup", async (req, res) => {
     result.sources.property = "error: " + e.message;
   }
 
-  // ── 2. AVM — use attomId if we have it, otherwise fall back to address ──────
+  // ── 2. AVM — use /attomavm/detail with attomId (more reliable than address) ─
   try {
-    const avmParams = attomId
-      ? { attomid: attomId }
-      : { address1, address2: address2Clean };
-    const data = await attomGet("/avm/detail", avmParams);
+    if (!attomId) throw new Error("No attomId from property detail");
+    const data = await attomGet("/attomavm/detail", { attomid: attomId });
     const avm = data?.property?.[0]?.avm;
     if (avm) {
       result.avm = {
@@ -232,9 +230,11 @@ app.post("/api/attom/lookup", async (req, res) => {
         low:        avm.amount?.low,
         high:       avm.amount?.high,
         asIsValue:  avm.amount?.value,
-        confidence: avm.condition?.indicator,
+        confidence: avm.condition?.indicator || avm.amount?.scr,
       };
       result.sources.avm = "attom";
+    } else {
+      result.sources.avm = "no AVM data for this property";
     }
   } catch(e) {
     result.sources.avm = "error: " + e.message;

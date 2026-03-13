@@ -257,48 +257,69 @@ app.post("/api/attom/lookup", async (req, res) => {
     result.sources.tax = "error: " + e.message;
   }
 
-  // ── 4. Sold Comps — /sale/snapshot with lat/long radius, last 12 months ─────
+  // ── 4. Sold Comps — /sale/snapshot with lat/long radius ─────────────────────
   try {
     if (!latitude || !longitude) throw new Error("No lat/long from property detail — cannot do radius comp search");
 
     const now   = new Date();
-    const start = new Date(now);
-    start.setFullYear(start.getFullYear() - 1);
     const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 
-    const data = await attomGet("/sale/snapshot", {
-      latitude,
-      longitude,
-      radius:              "0.5",
-      startSaleSearchDate: fmt(start),
-      endSaleSearchDate:   fmt(now),
-      pageSize:            "10",
-    });
-    const sales = data?.property;
+    // Try last 12 months at 0.5mi first, then widen to 24 months / 1mi if nothing found
+    const searches = [
+      { months: 12, radius: "0.5" },
+      { months: 24, radius: "1.0" },
+      { months: 36, radius: "1.5" },
+    ];
+
+    let sales = null;
+    let usedSearch = null;
+
+    for (const s of searches) {
+      const start = new Date(now);
+      start.setMonth(start.getMonth() - s.months);
+      const data = await attomGet("/sale/snapshot", {
+        latitude,
+        longitude,
+        radius:              s.radius,
+        startSaleSearchDate: fmt(start),
+        endSaleSearchDate:   fmt(now),
+        pageSize:            "25",
+      });
+      const props = data?.property?.filter(p => p.sale?.amount?.saleAmt > 0);
+      if (props && props.length >= 3) {
+        sales = props;
+        usedSearch = s;
+        break;
+      }
+    }
+
     if (sales && sales.length > 0) {
-      result.comps = sales
-        .filter(p => p.sale?.amount?.saleAmt > 0)
-        .slice(0, 5)
-        .map(p => {
-          const b    = p.building || {};
-          const sale = p.sale || {};
-          const sqft = b.size?.livingSize || b.size?.universalSize || 0;
-          const salePrice = sale.amount?.saleAmt || 0;
-          return {
-            address:      [p.address?.line1, p.address?.locality, p.address?.countrySubd].filter(Boolean).join(", "),
-            beds:         String(b.rooms?.beds || ""),
-            baths:        String(b.rooms?.bathsTotal || b.rooms?.bathsFull || ""),
-            sqft:         sqft,
-            salePrice:    salePrice,
-            pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,
-            soldDate:     sale.saleTransDate ? sale.saleTransDate.slice(0, 10) : "",
-            notes:        `ATTOM verified sale`,
-            source:       "attom",
-          };
-        });
-      result.sources.comps = "attom";
+      // Sort by sale date descending, take 5 most recent
+      sales.sort((a, b) => {
+        const da = a.sale?.saleTransDate || "";
+        const db = b.sale?.saleTransDate || "";
+        return db.localeCompare(da);
+      });
+      result.comps = sales.slice(0, 5).map(p => {
+        const b    = p.building || {};
+        const sale = p.sale || {};
+        const sqft = b.size?.livingSize || b.size?.universalSize || 0;
+        const salePrice = sale.amount?.saleAmt || 0;
+        return {
+          address:      [p.address?.line1, p.address?.locality, p.address?.countrySubd].filter(Boolean).join(", "),
+          beds:         String(b.rooms?.beds || ""),
+          baths:        String(b.rooms?.bathsTotal || b.rooms?.bathsFull || ""),
+          sqft:         sqft,
+          salePrice:    salePrice,
+          pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,
+          soldDate:     sale.saleTransDate ? sale.saleTransDate.slice(0, 10) : "",
+          notes:        `ATTOM verified sale`,
+          source:       "attom",
+        };
+      });
+      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi radius — ${sales.length} found)`;
     } else {
-      result.sources.comps = "no sales found in last 12 months within 0.5mi";
+      result.sources.comps = "no sales found within 36 months / 1.5mi — using AI estimates";
     }
   } catch(e) {
     result.sources.comps = "error: " + e.message;

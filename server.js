@@ -182,25 +182,36 @@ app.post("/api/attom/lookup", async (req, res) => {
 
   const result = { ok: true, sources: {} };
 
+  // address2 without comma between city and state — ATTOM requires e.g. "Denver CO" not "Denver, CO"
+  const address2Clean = cityStateZip.replace(/,\s*/g, " ").trim();
+
+  let attomId   = null;
+  let latitude  = null;
+  let longitude = null;
+
   // ── 1. Property Detail ──────────────────────────────────────────────────────
   try {
-    const data = await attomGet("/property/detail", { address1, address2: cityStateZip });
+    const data = await attomGet("/property/detail", { address1, address2: address2Clean });
     const prop = data?.property?.[0];
     if (prop) {
       const b = prop.building || {};
       const lot = prop.lot || {};
       const sum = prop.summary || {};
+      attomId   = prop.identifier?.attomId;
+      latitude  = prop.location?.latitude;
+      longitude = prop.location?.longitude;
       result.property = {
-        attomId:    prop.identifier?.attomId,
-        beds:       b.rooms?.beds,
-        baths:      b.rooms?.bathsTotal || b.rooms?.bathsFull,
-        sqft:       b.size?.livingSize || b.size?.universalSize,
-        yearBuilt:  sum.yearBuilt,
-        lotSqft:    lot.lotSize1,
-        propType:   sum.propType || sum.propSubType,
-        county:     prop.area?.countrySecSubd,
-        zip:        prop.address?.postal1,
-        state:      prop.address?.stateFips ? undefined : prop.address?.country,
+        attomId,
+        beds:      b.rooms?.beds,
+        baths:     b.rooms?.bathsTotal || b.rooms?.bathsFull,
+        sqft:      b.size?.livingSize || b.size?.universalSize,
+        yearBuilt: sum.yearBuilt,
+        lotSqft:   lot.lotSize1,
+        propType:  sum.propType || sum.propSubType,
+        county:    prop.area?.countrysecsubd || prop.area?.countrySecSubd,
+        zip:       prop.address?.postal1,
+        latitude,
+        longitude,
       };
       result.sources.property = "attom";
     }
@@ -208,16 +219,19 @@ app.post("/api/attom/lookup", async (req, res) => {
     result.sources.property = "error: " + e.message;
   }
 
-  // ── 2. AVM (Automated Valuation Model) ─────────────────────────────────────
+  // ── 2. AVM — use attomId if we have it, otherwise fall back to address ──────
   try {
-    const data = await attomGet("/avm/detail", { address1, address2: cityStateZip });
+    const avmParams = attomId
+      ? { attomid: attomId }
+      : { address1, address2: address2Clean };
+    const data = await attomGet("/avm/detail", avmParams);
     const avm = data?.property?.[0]?.avm;
     if (avm) {
       result.avm = {
-        value:    avm.amount?.value,
-        low:      avm.amount?.low,
-        high:     avm.amount?.high,
-        asIsValue: avm.amount?.value,   // AVM = current market value = AS-IS
+        value:      avm.amount?.value,
+        low:        avm.amount?.low,
+        high:       avm.amount?.high,
+        asIsValue:  avm.amount?.value,
         confidence: avm.condition?.indicator,
       };
       result.sources.avm = "attom";
@@ -228,7 +242,10 @@ app.post("/api/attom/lookup", async (req, res) => {
 
   // ── 3. Tax Assessment ───────────────────────────────────────────────────────
   try {
-    const data = await attomGet("/assessment/detail", { address1, address2: cityStateZip });
+    const taxParams = attomId
+      ? { attomid: attomId }
+      : { address1, address2: address2Clean };
+    const data = await attomGet("/assessment/detail", taxParams);
     const asmt = data?.property?.[0]?.assessment;
     if (asmt) {
       result.tax = {
@@ -243,19 +260,22 @@ app.post("/api/attom/lookup", async (req, res) => {
     result.sources.tax = "error: " + e.message;
   }
 
-  // ── 4. Sold Comps — /sale/snapshot within 0.5mi, last 12 months ────────────
+  // ── 4. Sold Comps — /sale/snapshot with lat/long radius, last 12 months ─────
   try {
-    const now = new Date();
+    if (!latitude || !longitude) throw new Error("No lat/long from property detail — cannot do radius comp search");
+
+    const now   = new Date();
     const start = new Date(now);
     start.setFullYear(start.getFullYear() - 1);
     const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 
     const data = await attomGet("/sale/snapshot", {
-      address1, address2: cityStateZip,
-      radius:               "0.5",
-      startSaleSearchDate:  fmt(start),
-      endSaleSearchDate:    fmt(now),
-      pageSize:             "10",
+      latitude,
+      longitude,
+      radius:              "0.5",
+      startSaleSearchDate: fmt(start),
+      endSaleSearchDate:   fmt(now),
+      pageSize:            "10",
     });
     const sales = data?.property;
     if (sales && sales.length > 0) {

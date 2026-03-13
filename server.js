@@ -171,19 +171,15 @@ app.post("/api/attom/lookup", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Address required" });
   }
 
-  // Parse address into street + city/state for ATTOM
-  // Expected formats: "123 Main St, Denver, CO" or "123 Main St, Denver, CO 80201"
+  // Parse address — keep commas, ATTOM handles both formats fine
   const parts = address.split(",").map(s => s.trim());
   if (parts.length < 2) {
     return res.status(400).json({ ok: false, error: "Address must include street and city/state (e.g. 123 Main St, Denver, CO)" });
   }
-  const address1 = parts[0];
-  const cityStateZip = parts.slice(1).join(", ");
+  const address1    = parts[0];
+  const address2    = parts.slice(1).join(", ").trim();
 
-  const result = { ok: true, sources: {} };
-
-  // address2 without comma between city and state — ATTOM requires e.g. "Denver CO" not "Denver, CO"
-  const address2Clean = cityStateZip.replace(/,\s*/g, " ").trim();
+  const result = { ok: true, sources: {}, debug: { address1, address2 } };
 
   let attomId   = null;
   let latitude  = null;
@@ -191,7 +187,7 @@ app.post("/api/attom/lookup", async (req, res) => {
 
   // ── 1. Property Detail ──────────────────────────────────────────────────────
   try {
-    const data = await attomGet("/property/detail", { address1, address2: address2Clean });
+    const data = await attomGet("/property/detail", { address1, address2: address2 });
     const prop = data?.property?.[0];
     if (prop) {
       const b = prop.building || {};
@@ -200,6 +196,7 @@ app.post("/api/attom/lookup", async (req, res) => {
       attomId   = prop.identifier?.attomId;
       latitude  = parseFloat(prop.location?.latitude);
       longitude = parseFloat(prop.location?.longitude);
+      result.matchedAddress = prop.address?.oneLine;
       result.property = {
         attomId,
         beds:      b.rooms?.beds,
@@ -244,7 +241,7 @@ app.post("/api/attom/lookup", async (req, res) => {
   try {
     const taxParams = attomId
       ? { attomid: attomId }
-      : { address1, address2: address2Clean };
+      : { address1, address2: address2 };
     const data = await attomGet("/assessment/detail", taxParams);
     const asmt = data?.property?.[0]?.assessment;
     if (asmt) {

@@ -243,12 +243,19 @@ app.post("/api/attom/lookup", async (req, res) => {
     result.sources.tax = "error: " + e.message;
   }
 
-  // ── 4. Sold Comps (Sales History of nearby properties) ─────────────────────
+  // ── 4. Sold Comps — /sale/snapshot within 0.5mi, last 12 months ────────────
   try {
-    const data = await attomGet("/saleshistory/snapshot", {
+    const now = new Date();
+    const start = new Date(now);
+    start.setFullYear(start.getFullYear() - 1);
+    const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+
+    const data = await attomGet("/sale/snapshot", {
       address1, address2: cityStateZip,
-      radius: "0.25",     // quarter mile radius
-      pageSize: "10",
+      radius:               "0.5",
+      startSaleSearchDate:  fmt(start),
+      endSaleSearchDate:    fmt(now),
+      pageSize:             "10",
     });
     const sales = data?.property;
     if (sales && sales.length > 0) {
@@ -256,7 +263,7 @@ app.post("/api/attom/lookup", async (req, res) => {
         .filter(p => p.sale?.amount?.saleAmt > 0)
         .slice(0, 5)
         .map(p => {
-          const b = p.building || {};
+          const b    = p.building || {};
           const sale = p.sale || {};
           const sqft = b.size?.livingSize || b.size?.universalSize || 0;
           const salePrice = sale.amount?.saleAmt || 0;
@@ -268,11 +275,13 @@ app.post("/api/attom/lookup", async (req, res) => {
             salePrice:    salePrice,
             pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,
             soldDate:     sale.saleTransDate ? sale.saleTransDate.slice(0, 10) : "",
-            notes:        `ATTOM verified sale · ${b.size?.livingSize ? b.size.livingSize + " sqft" : "sqft unknown"}`,
+            notes:        `ATTOM verified sale`,
             source:       "attom",
           };
         });
       result.sources.comps = "attom";
+    } else {
+      result.sources.comps = "no sales found in last 12 months within 0.5mi";
     }
   } catch(e) {
     result.sources.comps = "error: " + e.message;

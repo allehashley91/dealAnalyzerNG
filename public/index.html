@@ -825,7 +825,7 @@
         setParseError("");
         let rawText="";
         try{
-          rawText=await callAPI([{role:"user",content:`You are a real estate investment analyst. Extract data from this wholesale listing AND generate realistic comparable sales from your knowledge of the area. Return ONLY a raw JSON object — no markdown, no backticks, no explanation.\n\nLISTING:\n${pasteText}\n\nReturn this exact JSON structure:\n{"address":"","state":"","zip":"","neighborhood":"","propType":"Single family rehab","beds":"","baths":"","garage":"","yearBuilt":"","purchasePrice":0,"sqft":0,"arv":0,"asisValue":0,"wholesaleValue":0,"rehabCost":0,"holdMonths":6,"firstMortgagePct":80,"firstMortgageRate":11,"originationCost":0,"propertyTaxes":0,"rehabNotes":"","arvNotes":"","riskNotes":"","verdict":"","counterOffer":"","comps":[]}\n\nRules:\n- purchasePrice = cash asking price as a number\n- sqft = estimate from beds/baths/era if not stated\n- arv = your best market estimate after full rehab, based on location, beds/baths, sqft, and condition\n- asisValue = typically 5-15% above purchasePrice\n- originationCost = purchasePrice * 0.025\n- propertyTaxes = realistic local annual estimate / 2\n- rehabNotes = detailed line-item rehab breakdown based on described condition\n- arvNotes = 2-3 sentences explaining your ARV estimate with reference to comps\n- riskNotes = top 3 risks as a numbered list\n- comps = 3-5 realistic comparable sales from your knowledge of this neighborhood and market. Use actual or representative addresses, realistic sold prices, and dates. Comps can be from the past 1-3 years if recent data is sparse. Each comp: {"address":"","beds":"","baths":"","sqft":0,"salePrice":0,"pricePerSqft":0,"soldDate":"","notes":""}\n- counterOffer = your suggested maximum offer price as a dollar amount`}],1800);
+          rawText=await callAPI([{role:"user",content:`You are a real estate investment analyst. Extract data from this wholesale listing AND generate realistic comparable sales from your knowledge of the area. Return ONLY a raw JSON object — no markdown, no backticks, no explanation.\n\nLISTING:\n${pasteText}\n\nReturn this exact JSON structure:\n{"address":"","state":"","zip":"","neighborhood":"","propType":"Single family rehab","beds":"","baths":"","garage":"","yearBuilt":"","purchasePrice":0,"sqft":0,"arv":0,"asisValue":0,"wholesaleValue":0,"rehabCost":0,"holdMonths":6,"firstMortgagePct":80,"firstMortgageRate":11,"originationCost":0,"propertyTaxes":0,"rehabNotes":"","arvNotes":"","riskNotes":"","verdict":"","counterOffer":"","comps":[]}\n\nRules:\n- address = full address in format "123 Main St, City, ST 12345" — must include street, city, state. Never just the street.\n- purchasePrice = cash asking price as a number\n- sqft = estimate from beds/baths/era if not stated\n- arv = your best market estimate after full rehab, based on location, beds/baths, sqft, and condition\n- asisValue = typically 5-15% above purchasePrice\n- originationCost = purchasePrice * 0.025\n- propertyTaxes = realistic local annual estimate / 2\n- rehabNotes = detailed line-item rehab breakdown based on described condition\n- arvNotes = 2-3 sentences explaining your ARV estimate with reference to comps\n- riskNotes = top 3 risks as a numbered list\n- comps = 3-5 realistic comparable sales from your knowledge of this neighborhood and market. Use actual or representative addresses, realistic sold prices, and dates. Comps can be from the past 1-3 years if recent data is sparse. Each comp: {"address":"","beds":"","baths":"","sqft":0,"salePrice":0,"pricePerSqft":0,"soldDate":"","notes":""}\n- counterOffer = your suggested maximum offer price as a dollar amount`}],1800);
           // Strip markdown fences anywhere in response, then grab first JSON object
           const clean=rawText.replace(/```(?:json)?/gi,"").trim();
           const match=clean.match(/\{[\s\S]*\}/);
@@ -834,6 +834,37 @@
           setD(p=>({...p,...parsed,comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
           setArvAnalysis(null);
           setTab("📊 Analysis");
+          // Trigger ATTOM lookup with the parsed address — replaces AI comps with real data
+          if(parsed.address&&parsed.address.length>10&&attomConfigured){
+            setAttomLoading(true);
+            setAttomResult(null);
+            try{
+              const attomRes=await fetch("/api/attom/lookup",{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({address:parsed.address}),
+              });
+              const attomData=await attomRes.json();
+              if(attomData.ok){
+                setAttomResult(attomData);
+                setD(prev=>{
+                  const next={...prev};
+                  if(attomData.property){
+                    if(attomData.property.beds) next.beds=String(attomData.property.beds);
+                    if(attomData.property.baths) next.baths=String(attomData.property.baths);
+                    if(attomData.property.sqft) next.sqft=attomData.property.sqft;
+                    if(attomData.property.yearBuilt) next.yearBuilt=String(attomData.property.yearBuilt);
+                  }
+                  if(attomData.avm?.asIsValue) next.asisValue=attomData.avm.asIsValue;
+                  if(attomData.tax?.annualTax) next.propertyTaxes=Math.round(attomData.tax.annualTax/2);
+                  // Always replace AI-guessed comps with real ATTOM comps
+                  if(attomData.comps?.length>0) next.comps=attomData.comps;
+                  return next;
+                });
+              }
+            }catch(e){ /* silent — AI comps remain */ }
+            setAttomLoading(false);
+          }
         }catch(e){
           setParseError("❌ "+e.message+(rawText?"\n\nRaw response snippet:\n"+rawText.slice(0,400):""));
         }

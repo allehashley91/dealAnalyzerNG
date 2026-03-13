@@ -387,11 +387,9 @@ app.get("/api/attom/compdebug", async (req, res) => {
     });
     const summary = data?.property?.map(p => ({
       address: p.address?.oneLine,
-      saleAmt: p.sale?.amount?.saleAmt,
-      saleDate: p.sale?.saleTransDate,
-      beds: p.building?.rooms?.beds,
-      baths: p.building?.rooms?.bathsTotal,
-      sqft: p.building?.size?.livingSize,
+      sale: p.sale,
+      buildingRooms: p.building?.rooms,
+      buildingSize: p.building?.size,
     }));
     res.json({ attomId, latitude, longitude, total: data?.status?.total, returned: summary?.length, properties: summary });
   } catch(e) {

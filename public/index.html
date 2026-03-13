@@ -1132,7 +1132,7 @@ FOLLOW-UP QUESTIONS
                             {attomResult.property&&<div>✅ Property details</div>}
                             {attomResult.avm?.value&&<div>✅ AVM: {fmtD(attomResult.avm.value)}</div>}
                             {attomResult.tax?.annualTax&&<div>✅ Tax: {fmtD(attomResult.tax.annualTax)}/yr</div>}
-                            {attomResult.comps?.length>0&&<div>✅ {attomResult.comps.length} real comps</div>}
+                            {attomResult.comps?.length>0&&<div>✅ {attomResult.comps.length} comps · <span className="text-gray-500">{attomResult.sources?.comps}</span></div>}
                             {typeof attomResult.sources?.property==="string"&&attomResult.sources.property.startsWith("error")&&<div className="text-yellow-400 col-span-2">⚠️ Property: {attomResult.sources.property}</div>}
                             {typeof attomResult.sources?.avm==="string"&&attomResult.sources.avm.startsWith("error")&&<div className="text-yellow-400 col-span-2">⚠️ AVM: {attomResult.sources.avm}</div>}
                             {typeof attomResult.sources?.comps==="string"&&attomResult.sources.comps.startsWith("error")&&<div className="text-yellow-400 col-span-2">⚠️ Comps: {attomResult.sources.comps}</div>}

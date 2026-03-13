@@ -351,6 +351,54 @@ app.post("/api/attom/lookup", async (req, res) => {
   res.json(result);
 });
 
+// GET /api/attom/compdebug?address=... — shows exactly what sale/snapshot returns
+app.get("/api/attom/compdebug", async (req, res) => {
+  const address = req.query.address;
+  if (!address) return res.json({ error: "Pass ?address=123 Main St, City, ST" });
+  const parts = address.split(",").map(s => s.trim());
+  const address1 = parts[0];
+  const address2 = parts.slice(1).join(", ").trim();
+
+  // First get lat/long
+  let latitude, longitude, attomId;
+  try {
+    const d = await attomGet("/property/detail", { address1, address2 });
+    const prop = d?.property?.[0];
+    attomId   = prop?.identifier?.attomId;
+    latitude  = parseFloat(prop?.location?.latitude);
+    longitude = parseFloat(prop?.location?.longitude);
+  } catch(e) { return res.json({ error: "Property detail failed: " + e.message }); }
+
+  if (!latitude || !longitude) return res.json({ error: "No lat/long returned", attomId, latitude, longitude });
+
+  const now   = new Date();
+  const start = new Date(now);
+  start.setMonth(start.getMonth() - 24);
+  const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+
+  // Try without any filters first so we can see raw results
+  try {
+    const data = await attomGet("/sale/snapshot", {
+      latitude, longitude,
+      radius: "1.0",
+      startSaleSearchDate: fmt(start),
+      endSaleSearchDate:   fmt(now),
+      pageSize: "10",
+    });
+    const summary = data?.property?.map(p => ({
+      address: p.address?.oneLine,
+      saleAmt: p.sale?.amount?.saleAmt,
+      saleDate: p.sale?.saleTransDate,
+      beds: p.building?.rooms?.beds,
+      baths: p.building?.rooms?.bathsTotal,
+      sqft: p.building?.size?.livingSize,
+    }));
+    res.json({ attomId, latitude, longitude, total: data?.status?.total, returned: summary?.length, properties: summary });
+  } catch(e) {
+    res.json({ error: e.message, attomId, latitude, longitude });
+  }
+});
+
 // GET /api/attom/debug?address=... — returns raw ATTOM responses for troubleshooting
 app.get("/api/attom/debug", async (req, res) => {
   const address = req.query.address;

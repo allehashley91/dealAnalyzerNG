@@ -179,7 +179,7 @@
     }
 
 
-    function CompsTable({comps, arv, subject, onApplyArv}) {
+    function CompsTable({comps, arv, subject, onApplyArv, arvSource}) {
       if(!comps||comps.length===0) return null;
 
       const subjectSqft = subject?.sqft || 0;
@@ -284,7 +284,16 @@
                 <div>
                   <div className="text-xs text-gray-400">{avgPsf+"/ft² × "+subjectSqft.toLocaleString()+" ft²"}</div>
                   <div className={`text-xl font-bold ${exceedsComps?"text-yellow-300":"text-white"}`}>{fmtD(predictedArv)}</div>
-                  {arvDiff!==null&&(
+                  {arvSource==="comps"&&arv===predictedArv&&(
+                    <div className="text-xs text-indigo-400 mt-0.5">✅ Active ARV — comp-derived</div>
+                  )}
+                  {arvSource==="manual"&&(
+                    <div className="text-xs text-gray-400 mt-0.5">✏️ ARV manually set — not auto-updating</div>
+                  )}
+                  {arvSource==="ai"&&(
+                    <div className="text-xs text-yellow-400 mt-0.5">⚠️ ARV set by AI estimate — comp prediction differs</div>
+                  )}
+                  {arvDiff!==null&&!(arvSource==="comps"&&arv===predictedArv)&&(
                     <div className={`text-xs mt-0.5 ${variance<5?"text-green-400":variance<10?"text-yellow-400":"text-red-400"}`}>
                       {arvDiff>=0?"+":""}{fmtD(arvDiff)} vs your ARV ({pctDiff>=0?"+":""}{pctDiff.toFixed(1)}%)
                     </div>
@@ -642,6 +651,7 @@
       const [saved,setSaved]=useState(false);
       const [arvAnalysis,setArvAnalysis]=useState(null);
       const [arvLoading,setArvLoading]=useState(false);
+      const [arvSource,setArvSource]=useState("none"); // "none"|"ai"|"comps"|"manual"
       const [attomLoading,setAttomLoading]=useState(false);
       const [attomResult,setAttomResult]=useState(null); // {sources, property, avm, tax, comps}
       const [attomConfigured,setAttomConfigured]=useState(null); // null=unknown, true/false
@@ -649,6 +659,29 @@
       const set=(k,v)=>setD(p=>({...p,[k]:v}));
       const num=(k,v)=>set(k,parseFloat(v)||0);
       const r=calc(d);
+
+      // Compute predictedArv from comps at App level so ATTOM fetch can auto-apply it
+      const appPredictedArv = React.useMemo(()=>{
+        const comps = d.comps || [];
+        const sqft  = d.sqft  || 0;
+        if(!sqft || comps.length===0) return 0;
+        const withPsf = comps.map(c=>{
+          const psf = c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);
+          return {...c,psf};
+        }).filter(c=>c.psf>0&&c.salePrice>0);
+        if(withPsf.length===0) return 0;
+        let filtered = withPsf;
+        if(withPsf.length>=4){
+          const sorted=[...withPsf].sort((a,b)=>a.psf-b.psf);
+          const q1=sorted[Math.floor(sorted.length*0.25)].psf;
+          const q3=sorted[Math.floor(sorted.length*0.75)].psf;
+          const iqr=q3-q1;
+          const f=withPsf.filter(c=>c.psf>=q1-1.5*iqr&&c.psf<=q3+1.5*iqr);
+          if(f.length>=2) filtered=f;
+        }
+        const avgPsf=Math.round(filtered.reduce((s,c)=>s+c.psf,0)/filtered.length);
+        return Math.round(avgPsf*sqft);
+      },[d.comps,d.sqft]);
 
       // Load history from DB on mount and when switching to History tab
       const fetchHistory=useCallback(async()=>{
@@ -921,6 +954,9 @@
           const match=clean.match(/\{[\s\S]*\}/);
           if(!match) throw new Error("No JSON object found in API response.");
           const parsed=JSON.parse(match[0]);
+          // Detect if AI explicitly stated a specific ARV value in arvNotes
+          const aiStatedArv = parsed.arvNotes && /\$[\d,]+|\d{3,}/.test(parsed.arvNotes) && parsed.arv > 0;
+          setArvSource(aiStatedArv ? "ai" : "none");
           setD(p=>({...p,...parsed,comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
           setArvAnalysis(null);
           setTab("📊 Analysis");
@@ -948,9 +984,35 @@
                   if(attomData.avm?.asIsValue) next.asisValue=attomData.avm.asIsValue;
                   if(attomData.tax?.annualTax) next.propertyTaxes=Math.round(attomData.tax.annualTax/2);
                   // Always replace AI-guessed comps with real ATTOM comps
-                  if(attomData.comps?.length>0) next.comps=attomData.comps;
+                  if(attomData.comps?.length>0){
+                    next.comps=attomData.comps;
+                    // Auto-compute ARV from new comps unless user manually set it
+                    // (arvSource check happens after setD via useEffect below)
+                  }
                   return next;
                 });
+                // After ATTOM comps land, auto-apply comp-based ARV unless manually overridden
+                if(attomData.comps?.length>0){
+                  setArvSource(src=>{
+                    if(src!=="manual"){
+                      // compute inline since appPredictedArv hasn't updated yet
+                      const comps=attomData.comps;
+                      const sqft=attomData.property?.sqft||parsed.sqft||0;
+                      if(sqft>0&&comps.length>0){
+                        const withPsf=comps.map(c=>{const psf=c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);return {...c,psf};}).filter(c=>c.psf>0&&c.salePrice>0);
+                        if(withPsf.length>0){
+                          let flt=withPsf;
+                          if(withPsf.length>=4){const s=[...withPsf].sort((a,b)=>a.psf-b.psf);const q1=s[Math.floor(s.length*0.25)].psf;const q3=s[Math.floor(s.length*0.75)].psf;const iqr=q3-q1;const f=withPsf.filter(c=>c.psf>=q1-1.5*iqr&&c.psf<=q3+1.5*iqr);if(f.length>=2)flt=f;}
+                          const avg=Math.round(flt.reduce((s,c)=>s+c.psf,0)/flt.length);
+                          const pred=Math.round(avg*sqft);
+                          if(pred>0) setD(p=>({...p,arv:pred}));
+                        }
+                      }
+                      return "comps";
+                    }
+                    return src;
+                  });
+                }
               }
             }catch(e){ /* silent — AI comps remain */ }
             setAttomLoading(false);
@@ -1252,7 +1314,7 @@ FOLLOW-UP QUESTIONS
                     </div>
                     <div className="bg-gray-800 rounded-xl p-4">
                       <h2 className="text-xs font-semibold text-indigo-400 mb-3 uppercase">Valuation & Rehab</h2>
-                      <F label="ARV"><input type="number" className={inp} value={d.arv||""} onChange={e=>num("arv",e.target.value)}/></F>
+                      <F label="ARV"><input type="number" className={inp} value={d.arv||""} onChange={e=>{num("arv",e.target.value);setArvSource("manual");}}/></F>
                       <F label="AS-IS MLS Value"><input type="number" className={inp} value={d.asisValue||""} onChange={e=>num("asisValue",e.target.value)}/></F>
                       <F label="Purchase Price"><input type="number" className={inp} value={d.purchasePrice||""} onChange={e=>num("purchasePrice",e.target.value)}/></F>
                       <F label="Rehab Cost"><input type="number" className={inp} value={d.rehabCost||""} onChange={e=>num("rehabCost",e.target.value)}/></F>
@@ -1377,7 +1439,7 @@ FOLLOW-UP QUESTIONS
                     {d.comps?.length>0&&(
                       <div className="bg-gray-800 rounded-xl p-3">
                         <div className="text-xs font-semibold text-indigo-400 mb-2 uppercase">🏘️ Comparable Sales — ARV Basis</div>
-                        <CompsTable comps={d.comps} arv={d.arv} subject={d} onApplyArv={v=>setD(p=>({...p,arv:v}))}/>
+                        <CompsTable comps={d.comps} arv={d.arv} subject={d} arvSource={arvSource} onApplyArv={v=>{setD(p=>({...p,arv:v}));setArvSource("comps");}}/>
                       </div>
                     )}
 

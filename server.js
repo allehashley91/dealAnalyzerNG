@@ -296,7 +296,7 @@ app.post("/api/attom/lookup", async (req, res) => {
         propertytype:        "SFR",
         ...bedBathParams,
       });
-      const props = data?.property?.filter(p => p.sale?.amount?.saleAmt > 0);
+      const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0);
       if (props && props.length >= 3) {
         sales = props;
         usedSearch = s;
@@ -316,7 +316,7 @@ app.post("/api/attom/lookup", async (req, res) => {
         pageSize:            "25",
         propertytype:        "SFR",
       });
-      const props = data?.property?.filter(p => p.sale?.amount?.saleAmt > 0);
+      const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0);
       if (props && props.length > 0) { sales = props; usedSearch = { months: 36, radius: "2.0", note: "no bed/bath filter" }; }
     }
 
@@ -324,14 +324,14 @@ app.post("/api/attom/lookup", async (req, res) => {
       // Sort newest first, take top 5
       sales.sort((a, b) => (b.sale?.saleTransDate||"").localeCompare(a.sale?.saleTransDate||""));
       result.comps = sales.slice(0, 5).map(p => {
-        const b    = p.building || {};
-        const sale = p.sale || {};
-        const sqft = b.size?.livingSize || b.size?.universalSize || 0;
-        const salePrice = sale.amount?.saleAmt || 0;
+        const b         = p.building || {};
+        const sale      = p.sale || {};
+        const sqft      = b.size?.universalsize || b.size?.livingsize || 0;
+        const salePrice = sale.amount?.saleamt || 0;
         return {
           address:      [p.address?.line1, p.address?.locality, p.address?.countrySubd].filter(Boolean).join(", "),
           beds:         String(b.rooms?.beds || ""),
-          baths:        String(b.rooms?.bathsTotal || b.rooms?.bathsFull || ""),
+          baths:        String(b.rooms?.bathstotal || b.rooms?.bathsfull || ""),
           sqft:         sqft,
           salePrice:    salePrice,
           pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,

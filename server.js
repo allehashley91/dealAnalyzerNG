@@ -310,6 +310,21 @@ app.post("/api/attom/lookup", async (req, res) => {
   res.json(result);
 });
 
+// GET /api/attom/debug?address=... — returns raw ATTOM property/detail response for troubleshooting
+app.get("/api/attom/debug", async (req, res) => {
+  const address = req.query.address;
+  if (!address) return res.json({ error: "Pass ?address=123 Main St, City, ST" });
+  const parts = address.split(",").map(s => s.trim());
+  const address1 = parts[0];
+  const address2Clean = parts.slice(1).join(" ").trim();
+  try {
+    const data = await attomGet("/property/detail", { address1, address2: address2Clean });
+    res.json({ address1, address2Clean, raw: data });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // GET /api/attom/status — lets frontend check if key is configured
 app.get("/api/attom/status", (req, res) => {
   // Re-read at request time so we catch keys added after startup

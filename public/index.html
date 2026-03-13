@@ -215,11 +215,10 @@
 
       const rawPsfArv = subjectSqft > 0 && avgPsf > 0 ? Math.round(avgPsf * subjectSqft) : 0;
 
-      // If subject is materially larger than avg comp, small-home $/sqft overstates value.
-      // Cap at highest comp sale price and flag that comps are too small.
+      // Flag if prediction runs more than 10% over the highest comp — comps may be too small/mismatched.
+      const exceedsComps = maxCompSalePrice > 0 && rawPsfArv > maxCompSalePrice * 1.10;
       const subjectLargerThanComps = avgCompSqft > 0 && subjectSqft > avgCompSqft * 1.15;
-      const wasCapped = subjectLargerThanComps && rawPsfArv > maxCompSalePrice;
-      const predictedArv = wasCapped ? maxCompSalePrice : rawPsfArv;
+      const predictedArv = rawPsfArv;
 
       const removedCount = compsWithPsf.length - filtered.length;
 
@@ -259,13 +258,13 @@
 
           {/* ARV Prediction Panel */}
           {predictedArv > 0 && (
-            <div className={`rounded-lg p-3 ${wasCapped?"bg-red-950 border border-red-700":"bg-gray-700"}`}>
+            <div className={`rounded-lg p-3 ${exceedsComps?"bg-yellow-950 border border-yellow-700":"bg-gray-700"}`}>
               <div className="text-xs font-semibold text-indigo-300 mb-2">📐 Comp-Based ARV Prediction</div>
 
               {/* Weak comps warning */}
-              {wasCapped&&(
-                <div className="bg-red-900 border border-red-600 rounded p-2 mb-2 text-xs text-red-200">
-                  ⚠️ <span className="font-semibold">These comps are too small to support this ARV.</span> Subject is {subjectSqft.toLocaleString()} ft² but avg comp is only {avgCompSqft.toLocaleString()} ft². Small homes sell at a higher $/sqft — applying that rate to a larger home overstates value. Prediction capped at the highest comp sale price. <span className="font-semibold">Better comps needed.</span>
+              {exceedsComps&&(
+                <div className="bg-yellow-900 border border-yellow-600 rounded p-2 mb-2 text-xs text-yellow-200">
+                  ⚠️ <span className="font-semibold">Prediction runs more than 10% above the highest comp ({fmtD(maxCompSalePrice)}).</span> Subject is {subjectSqft.toLocaleString()} ft² but avg comp is only {avgCompSqft.toLocaleString()} ft² — smaller homes carry a higher $/sqft that may not apply here. Consider pulling larger or more similar comps to validate this ARV.
                 </div>
               )}
 
@@ -273,20 +272,20 @@
                 <div className="text-gray-400">Comps used ({filtered.length} of {compsWithPsf.length}{removedCount>0?`, ${removedCount} outlier${removedCount>1?"s":""} excluded`:""})</div>
                 <div className="text-right text-white font-medium">${avgPsf}/ft² avg</div>
                 <div className="text-gray-400">Avg comp size</div>
-                <div className={`text-right font-medium ${wasCapped?"text-red-400":"text-white"}`}>{avgCompSqft.toLocaleString()} ft²</div>
+                <div className={`text-right font-medium ${exceedsComps?"text-yellow-400":"text-white"}`}>{avgCompSqft.toLocaleString()} ft²</div>
                 <div className="text-gray-400">Subject sqft</div>
                 <div className="text-right text-white">{subjectSqft.toLocaleString()} ft²</div>
-                {wasCapped&&(
-                  <><div className="text-gray-400">Raw $/sqft × sqft (unreliable)</div><div className="text-right text-red-400 line-through">{fmtD(rawPsfArv)}</div></>
+                {exceedsComps&&(
+                  <><div className="text-gray-400">Highest comp sale</div><div className="text-right text-yellow-300">{fmtD(maxCompSalePrice)}</div></>
                 )}
-                {wasCapped&&(
-                  <><div className="text-gray-400">Capped at highest comp</div><div className="text-right text-yellow-300">{fmtD(maxCompSalePrice)}</div></>
+                {exceedsComps&&(
+                  
                 )}
               </div>
               <div className="flex items-center justify-between border-t border-gray-600 pt-2">
                 <div>
-                  <div className="text-xs text-gray-400">{wasCapped?"Capped ceiling (comps too small)":avgPsf+"/ft² × "+subjectSqft.toLocaleString()+" ft²"}</div>
-                  <div className={`text-xl font-bold ${wasCapped?"text-yellow-300":"text-white"}`}>{fmtD(predictedArv)}</div>
+                  <div className="text-xs text-gray-400">{avgPsf+"/ft² × "+subjectSqft.toLocaleString()+" ft²"}</div>
+                  <div className={`text-xl font-bold ${exceedsComps?"text-yellow-300":"text-white"}`}>{fmtD(predictedArv)}</div>
                   {arvDiff!==null&&(
                     <div className={`text-xs mt-0.5 ${variance<5?"text-green-400":variance<10?"text-yellow-400":"text-red-400"}`}>
                       {arvDiff>=0?"+":""}{fmtD(arvDiff)} vs your ARV ({pctDiff>=0?"+":""}{pctDiff.toFixed(1)}%)

@@ -264,11 +264,20 @@ app.post("/api/attom/lookup", async (req, res) => {
     const now   = new Date();
     const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 
-    // Try last 12 months at 0.5mi first, then widen to 24 months / 1mi if nothing found
+    const subjectBeds  = result.property?.beds  ? parseInt(result.property.beds)  : null;
+    const subjectBaths = result.property?.baths ? parseFloat(result.property.baths) : null;
+
+    // Build bed/bath filter params if we have them — ±1 from subject
+    const bedBathParams = {};
+    if (subjectBeds)  { bedBathParams.minbeds  = Math.max(1, subjectBeds  - 1); bedBathParams.maxbeds  = subjectBeds  + 1; }
+    if (subjectBaths) { bedBathParams.minbaths = Math.max(1, subjectBaths - 1); bedBathParams.maxbaths = subjectBaths + 1; }
+
+    // Ladder: try progressively wider until we get at least 3 results
     const searches = [
       { months: 12, radius: "0.5" },
       { months: 24, radius: "1.0" },
       { months: 36, radius: "1.5" },
+      { months: 36, radius: "2.0" },
     ];
 
     let sales = null;
@@ -284,6 +293,8 @@ app.post("/api/attom/lookup", async (req, res) => {
         startSaleSearchDate: fmt(start),
         endSaleSearchDate:   fmt(now),
         pageSize:            "25",
+        propertytype:        "SFR",
+        ...bedBathParams,
       });
       const props = data?.property?.filter(p => p.sale?.amount?.saleAmt > 0);
       if (props && props.length >= 3) {
@@ -293,13 +304,25 @@ app.post("/api/attom/lookup", async (req, res) => {
       }
     }
 
-    if (sales && sales.length > 0) {
-      // Sort by sale date descending, take 5 most recent
-      sales.sort((a, b) => {
-        const da = a.sale?.saleTransDate || "";
-        const db = b.sale?.saleTransDate || "";
-        return db.localeCompare(da);
+    // If still nothing with bed/bath filter, try without it at widest range
+    if (!sales || sales.length < 3) {
+      const start = new Date(now);
+      start.setMonth(start.getMonth() - 36);
+      const data = await attomGet("/sale/snapshot", {
+        latitude, longitude,
+        radius:              "2.0",
+        startSaleSearchDate: fmt(start),
+        endSaleSearchDate:   fmt(now),
+        pageSize:            "25",
+        propertytype:        "SFR",
       });
+      const props = data?.property?.filter(p => p.sale?.amount?.saleAmt > 0);
+      if (props && props.length > 0) { sales = props; usedSearch = { months: 36, radius: "2.0", note: "no bed/bath filter" }; }
+    }
+
+    if (sales && sales.length > 0) {
+      // Sort newest first, take top 5
+      sales.sort((a, b) => (b.sale?.saleTransDate||"").localeCompare(a.sale?.saleTransDate||""));
       result.comps = sales.slice(0, 5).map(p => {
         const b    = p.building || {};
         const sale = p.sale || {};
@@ -313,13 +336,13 @@ app.post("/api/attom/lookup", async (req, res) => {
           salePrice:    salePrice,
           pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,
           soldDate:     sale.saleTransDate ? sale.saleTransDate.slice(0, 10) : "",
-          notes:        `ATTOM verified sale`,
+          notes:        `ATTOM verified sale${usedSearch?.note ? " · "+usedSearch.note : ""}`,
           source:       "attom",
         };
       });
-      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi radius — ${sales.length} found)`;
+      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi${usedSearch?.note ? " · "+usedSearch.note : ""} — ${sales.length} found)`;
     } else {
-      result.sources.comps = "no sales found within 36 months / 1.5mi — using AI estimates";
+      result.sources.comps = "no SFR sales found within 36 months / 2mi — using AI estimates";
     }
   } catch(e) {
     result.sources.comps = "error: " + e.message;

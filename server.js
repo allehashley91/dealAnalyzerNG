@@ -310,19 +310,27 @@ app.post("/api/attom/lookup", async (req, res) => {
   res.json(result);
 });
 
-// GET /api/attom/debug?address=... — returns raw ATTOM property/detail response for troubleshooting
+// GET /api/attom/debug?address=... — returns raw ATTOM responses for troubleshooting
 app.get("/api/attom/debug", async (req, res) => {
   const address = req.query.address;
   if (!address) return res.json({ error: "Pass ?address=123 Main St, City, ST" });
   const parts = address.split(",").map(s => s.trim());
   const address1 = parts[0];
-  const address2Clean = parts.slice(1).join(" ").trim();
+  // Try both formats so we can see which one works
+  const address2WithComma    = parts.slice(1).join(", ").trim();
+  const address2WithoutComma = parts.slice(1).join(" ").trim();
+  const out = { address1, address2WithComma, address2WithoutComma, results: {} };
+  // Try with comma
   try {
-    const data = await attomGet("/property/detail", { address1, address2: address2Clean });
-    res.json({ address1, address2Clean, raw: data });
-  } catch(e) {
-    res.json({ error: e.message });
-  }
+    const d = await attomGet("/property/detail", { address1, address2: address2WithComma });
+    out.results.withComma = { attomId: d?.property?.[0]?.identifier?.attomId, lat: d?.property?.[0]?.location?.latitude, lng: d?.property?.[0]?.location?.longitude, matched: d?.property?.[0]?.address?.oneLine, status: d?.status?.msg };
+  } catch(e) { out.results.withComma = { error: e.message }; }
+  // Try without comma
+  try {
+    const d = await attomGet("/property/detail", { address1, address2: address2WithoutComma });
+    out.results.withoutComma = { attomId: d?.property?.[0]?.identifier?.attomId, lat: d?.property?.[0]?.location?.latitude, lng: d?.property?.[0]?.location?.longitude, matched: d?.property?.[0]?.address?.oneLine, status: d?.status?.msg };
+  } catch(e) { out.results.withoutComma = { error: e.message }; }
+  res.json(out);
 });
 
 // GET /api/attom/status — lets frontend check if key is configured

@@ -683,6 +683,13 @@
         return Math.round(avgPsf*sqft);
       },[d.comps,d.sqft]);
 
+      // When arvSource="comps", keep ARV in sync with appPredictedArv whenever comps or sqft change
+      React.useEffect(()=>{
+        if(arvSource==="comps" && appPredictedArv>0){
+          setD(p=>({...p,arv:appPredictedArv}));
+        }
+      },[arvSource, appPredictedArv]);
+
       // Load history from DB on mount and when switching to History tab
       const fetchHistory=useCallback(async()=>{
         setHistoryLoading(true);
@@ -991,28 +998,8 @@
                   }
                   return next;
                 });
-                // After ATTOM comps land, auto-apply comp-based ARV unless manually overridden
-                if(attomData.comps?.length>0){
-                  setArvSource(src=>{
-                    if(src!=="manual"){
-                      // compute inline since appPredictedArv hasn't updated yet
-                      const comps=attomData.comps;
-                      const sqft=attomData.property?.sqft||parsed.sqft||0;
-                      if(sqft>0&&comps.length>0){
-                        const withPsf=comps.map(c=>{const psf=c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);return {...c,psf};}).filter(c=>c.psf>0&&c.salePrice>0);
-                        if(withPsf.length>0){
-                          let flt=withPsf;
-                          if(withPsf.length>=4){const s=[...withPsf].sort((a,b)=>a.psf-b.psf);const q1=s[Math.floor(s.length*0.25)].psf;const q3=s[Math.floor(s.length*0.75)].psf;const iqr=q3-q1;const f=withPsf.filter(c=>c.psf>=q1-1.5*iqr&&c.psf<=q3+1.5*iqr);if(f.length>=2)flt=f;}
-                          const avg=Math.round(flt.reduce((s,c)=>s+c.psf,0)/flt.length);
-                          const pred=Math.round(avg*sqft);
-                          if(pred>0) setD(p=>({...p,arv:pred}));
-                        }
-                      }
-                      return "comps";
-                    }
-                    return src;
-                  });
-                }
+                // Signal that ATTOM comps just landed — useEffect will apply ARV
+                if(attomData.comps?.length>0) setArvSource(src=>src==="manual"?src:"comps");
               }
             }catch(e){ /* silent — AI comps remain */ }
             setAttomLoading(false);

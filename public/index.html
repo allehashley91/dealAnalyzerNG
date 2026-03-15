@@ -954,9 +954,9 @@
           const match=clean.match(/\{[\s\S]*\}/);
           if(!match) throw new Error("No JSON object found in API response.");
           const parsed=JSON.parse(match[0]);
-          // Detect if AI explicitly stated a specific ARV value in arvNotes
-          const aiStatedArv = parsed.arvNotes && /\$[\d,]+|\d{3,}/.test(parsed.arvNotes) && parsed.arv > 0;
-          setArvSource(aiStatedArv ? "ai" : "none");
+          // Only treat ARV as user-provided if the original listing text explicitly mentions ARV/after repair value
+          const listingMentionsArv = /arv|after.?repair|after.?rehab/i.test(pasteText);
+          setArvSource(listingMentionsArv ? "ai" : "none");
           setD(p=>({...p,...parsed,comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
           setArvAnalysis(null);
           setTab("📊 Analysis");

@@ -693,16 +693,7 @@
         return Math.round(avgPsf*sqft);
       },[d.comps,d.sqft]);
 
-      // Keep ref in sync with arvSource state
-      React.useEffect(()=>{ arvSourceRef.current=arvSource; },[arvSource]);
-
-      // When arvSource="comps", keep ARV in sync with appPredictedArv whenever comps or sqft change
-      // Use ref to guard — avoids stale closure firing during loadFromHistory
-      React.useEffect(()=>{
-        if(arvSourceRef.current==="comps" && appPredictedArv>0){
-          setD(p=>({...p,arv:appPredictedArv}));
-        }
-      },[arvSource, appPredictedArv]);
+      // arvSource ref kept in sync manually at each callsite — no useEffect to avoid timing races
 
       // Load history from DB on mount and when switching to History tab
       const fetchHistory=useCallback(async()=>{
@@ -1013,20 +1004,25 @@
                   }
                   if(attomData.avm?.asIsValue) next.asisValue=attomData.avm.asIsValue;
                   if(attomData.tax?.annualTax) next.propertyTaxes=Math.round(attomData.tax.annualTax/2);
-                  // Always replace AI-guessed comps with real ATTOM comps
                   if(attomData.comps?.length>0){
                     next.comps=attomData.comps;
-                    // Auto-compute ARV from new comps unless user manually set it
-                    // (arvSource check happens after setD via useEffect below)
+                    // Compute ARV directly here — sqft and comps are both in `next` now
+                    if(arvSourceRef.current!=="manual"){
+                      const sqft=next.sqft||0;
+                      const withPsf=next.comps.map(c=>{const psf=c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);return {...c,psf};}).filter(c=>c.psf>0&&c.salePrice>0);
+                      if(sqft>0&&withPsf.length>0){
+                        let flt=withPsf;
+                        if(withPsf.length>=4){const s=[...withPsf].sort((a,b)=>a.psf-b.psf);const q1=s[Math.floor(s.length*0.25)].psf;const q3=s[Math.floor(s.length*0.75)].psf;const iqr=q3-q1;const f=withPsf.filter(c=>c.psf>=q1-1.5*iqr&&c.psf<=q3+1.5*iqr);if(f.length>=2)flt=f;}
+                        const avg=Math.round(flt.reduce((s,c)=>s+c.psf,0)/flt.length);
+                        const pred=Math.round(avg*sqft);
+                        if(pred>0){ next.arv=pred; arvSourceRef.current="comps"; }
+                      }
+                    }
                   }
                   return next;
                 });
-                // Signal that ATTOM comps just landed — useEffect will apply ARV
-                if(attomData.comps?.length>0){
-                  if(arvSourceRef.current!=="manual"){
-                    arvSourceRef.current="comps";
-                    setArvSource("comps");
-                  }
+                if(attomData.comps?.length>0&&arvSourceRef.current==="comps"){
+                  setArvSource("comps");
                 }
               }
             }catch(e){ /* silent — AI comps remain */ }

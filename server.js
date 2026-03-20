@@ -287,7 +287,7 @@ app.post("/api/attom/lookup", async (req, res) => {
       if (subjectSqft && sqft) {
         const sqftPct = Math.abs(sqft - subjectSqft) / subjectSqft;
         score += sqftPct * 60;
-        if (sqftPct > 0.20) flags.push(`sqft off ${Math.round(sqftPct*100)}%`);
+        if (sqftPct > 0.25) flags.push(`sqft off ${Math.round(sqftPct*100)}%`);
       }
       // Beds — secondary (5pts each). A 5bd comp for a 4bd subject is fine.
       if (subjectBeds && beds !== null) {
@@ -327,7 +327,7 @@ app.post("/api/attom/lookup", async (req, res) => {
         comps.sort((a, b) => a.matchScore - b.matchScore);
         return comps;
       }
-      for (const pct of [0.20, 0.30, 0.50]) {
+      for (const pct of [0.25, 0.35, 0.50]) {
         const filtered = comps.filter(c => c.sqft === 0 || Math.abs(c.sqft - subjectSqft) / subjectSqft <= pct);
         if (filtered.length >= 3) {
           filtered.sort((a, b) => a.matchScore - b.matchScore);
@@ -378,7 +378,7 @@ app.post("/api/attom/lookup", async (req, res) => {
         radius:              s.radius,
         startSaleSearchDate: fmt(start),
         endSaleSearchDate:   fmt(now),
-        pageSize:            "25",
+        pageSize:            "50",
         propertytype:        "SFR",
         ...s.bedBath,
       });
@@ -406,7 +406,7 @@ app.post("/api/attom/lookup", async (req, res) => {
           radius:              s.radius,
           startSaleSearchDate: fmt(start),
           endSaleSearchDate:   fmt(now),
-          pageSize:            "25",
+          pageSize:            "50",
           propertytype:        "SFR",
           ...s.bedBath,
         });

@@ -239,13 +239,22 @@
               <tbody>{comps.map((c,i)=>{
                 const psf = c.pricePerSqft||(c.sqft&&c.salePrice?Math.round(c.salePrice/c.sqft):0);
                 const isOutlier = compsWithPsf.length >= 4 && !filtered.find(f => f.address===c.address && f.salePrice===c.salePrice);
+                const flags = c.matchFlags || [];
+                const hasFlags = flags.length > 0 || isOutlier;
+                // Match quality: no flags = green, 1 flag = yellow, 2+ or outlier = red
+                const matchColor = isOutlier ? "text-red-400" : flags.length === 0 ? "text-green-400" : flags.length === 1 ? "text-yellow-400" : "text-red-400";
+                const matchDot   = isOutlier ? "🔴" : flags.length === 0 ? "🟢" : flags.length === 1 ? "🟡" : "🔴";
                 return (
-                  <tr key={i} className={`border-b border-gray-700 ${isOutlier?"opacity-40":""}`}>
-                    <td className="py-1 pr-3 text-white font-medium">
-                      {c.address||`Comp #${i+1}`}
-                      {isOutlier&&<span className="ml-1 text-yellow-500 text-xs">(outlier)</span>}
+                  <tr key={i} className={`border-b border-gray-700 ${isOutlier?"opacity-50":""}`}>
+                    <td className="py-1 pr-3">
+                      <div className="text-white font-medium">{c.address||`Comp #${i+1}`}</div>
+                      {hasFlags&&(
+                        <div className={`text-xs mt-0.5 ${matchColor}`}>
+                          {matchDot} {isOutlier?"$/sqft outlier":flags.join(" · ")}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-1 pr-3 text-gray-300">{c.beds||"—"}bd/{c.baths||"—"}ba</td>
+                    <td className="py-1 pr-3 text-gray-300 whitespace-nowrap">{c.beds||"—"}bd/{c.baths||"—"}ba</td>
                     <td className="py-1 pr-3 text-right text-gray-300">{c.sqft?c.sqft.toLocaleString():"—"}</td>
                     <td className="py-1 pr-3 text-right text-green-400 font-bold">{fmtD(c.salePrice)}</td>
                     <td className="py-1 pr-3 text-right text-gray-300">${psf||"—"}/ft²</td>

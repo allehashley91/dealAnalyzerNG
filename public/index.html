@@ -962,7 +962,11 @@
                 if(attomData.property){
                   if(attomData.property.beds) staged.beds=String(attomData.property.beds);
                   if(attomData.property.baths) staged.baths=String(attomData.property.baths);
-                  if(attomData.property.sqft) staged.sqft=attomData.property.sqft;
+                  if(attomData.property.sqft){
+                    staged._aiSqft=staged.sqft||0;       // save what AI/listing said
+                    staged._attomSqft=attomData.property.sqft; // save what ATTOM says
+                    staged.sqft=attomData.property.sqft;
+                  }
                   if(attomData.property.yearBuilt) staged.yearBuilt=String(attomData.property.yearBuilt);
                   if(attomData.property.zip) staged.zip=attomData.property.zip;
                 }
@@ -985,6 +989,16 @@
           } else {
             staged.arv=0;
             staged._arvSource="none";
+          }
+
+          // Inject sqft discrepancy warning into riskNotes if ATTOM and listing differ by >10%
+          if(staged._attomSqft && staged._aiSqft && staged._aiSqft > 0){
+            const diff = Math.abs(staged._attomSqft - staged._aiSqft) / staged._aiSqft;
+            if(diff > 0.10){
+              const bigger = staged._attomSqft > staged._aiSqft ? "larger" : "smaller";
+              const warning = `⚠️ SQFT DISCREPANCY: Listing/AI estimated ${staged._aiSqft.toLocaleString()} sqft but ATTOM tax records show ${staged._attomSqft.toLocaleString()} sqft (${Math.round(diff*100)}% ${bigger}). Verify actual finished square footage with seller — this directly affects ARV and $/sqft calculations.`;
+              staged.riskNotes = warning + (staged.riskNotes ? " " + staged.riskNotes : "");
+            }
           }
 
           setParseStep("ready");
@@ -1284,7 +1298,14 @@ FOLLOW-UP QUESTIONS
                                 <F label="Baths"><input className={inp} value={p.baths||""} onChange={e=>setP("baths",e.target.value)}/></F>
                                 <F label="Year Built"><input className={inp} value={p.yearBuilt||""} onChange={e=>setP("yearBuilt",e.target.value)}/></F>
                               </div>
-                              <F label="Sq Ft"><input type="number" className={inp} value={p.sqft||""} onChange={e=>numP("sqft",e.target.value)}/></F>
+                              <F label="Sq Ft">
+                                <input type="number" className={inp} value={p.sqft||""} onChange={e=>numP("sqft",e.target.value)}/>
+                                {p._attomSqft&&p._aiSqft&&Math.abs(p._attomSqft-p._aiSqft)/p._aiSqft>0.10&&(
+                                  <div className="mt-1 text-xs bg-orange-950 border border-orange-700 rounded p-1.5 text-orange-300">
+                                    ⚠️ Listing said <span className="font-bold">{p._aiSqft.toLocaleString()}</span> sqft · ATTOM tax record shows <span className="font-bold">{p._attomSqft.toLocaleString()}</span> sqft — verify with seller before confirming
+                                  </div>
+                                )}
+                              </F>
                               <F label="Occupied?">
                                 <select className={inp} value={p.occupied?"y":"n"} onChange={e=>setP("occupied",e.target.value==="y")}>
                                   <option value="n">No (Vacant)</option><option value="y">Yes</option>

@@ -261,86 +261,130 @@ app.post("/api/attom/lookup", async (req, res) => {
   try {
     if (!latitude || !longitude) throw new Error("No lat/long from property detail — cannot do radius comp search");
 
-    const now   = new Date();
+    const now = new Date();
     const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 
     const subjectBeds  = result.property?.beds  ? parseInt(result.property.beds)  : null;
     const subjectBaths = result.property?.baths ? parseFloat(result.property.baths) : null;
+    const subjectSqft  = result.property?.sqft  ? parseInt(result.property.sqft)   : null;
 
-    // Build bed/bath filter params if we have them — ±1 from subject
-    const bedBathParams = {};
-    if (subjectBeds)  { bedBathParams.minbeds  = Math.max(1, subjectBeds  - 1); bedBathParams.maxbeds  = subjectBeds  + 1; }
-    if (subjectBaths) { bedBathParams.minbaths = Math.max(1, subjectBaths - 1); bedBathParams.maxbaths = subjectBaths + 1; }
+    // ── Helper: convert raw ATTOM property to comp object with match metadata ──
+    const toComp = (p, searchNote) => {
+      const b         = p.building || {};
+      const sale      = p.sale || {};
+      const sqft      = b.size?.universalsize || b.size?.livingsize || 0;
+      const salePrice = sale.amount?.saleamt || 0;
+      const beds      = b.rooms?.beds ? parseInt(b.rooms.beds) : null;
+      const baths     = b.rooms?.bathstotal || b.rooms?.bathsfull ? parseFloat(b.rooms?.bathstotal || b.rooms?.bathsfull) : null;
 
-    // Ladder: try progressively wider until we get at least 3 results
+      // Similarity score — lower = better match
+      // Components: sqft diff (weighted heaviest), bed diff, bath diff, recency
+      let score = 0;
+      const flags = [];
+
+      if (subjectSqft && sqft) {
+        const sqftPct = Math.abs(sqft - subjectSqft) / subjectSqft;
+        score += sqftPct * 40;  // up to 40 points for sqft diff
+        if (sqftPct > 0.30) flags.push(`sqft off ${Math.round(sqftPct*100)}%`);
+      }
+      if (subjectBeds && beds !== null) {
+        const bedDiff = Math.abs(beds - subjectBeds);
+        score += bedDiff * 10;  // 10 pts per bed off
+        if (bedDiff > 1) flags.push(`${bedDiff} bed diff`);
+      }
+      if (subjectBaths && baths !== null) {
+        const bathDiff = Math.abs(baths - subjectBaths);
+        score += bathDiff * 5;  // 5 pts per bath off
+        if (bathDiff > 1) flags.push(`${bathDiff} bath diff`);
+      }
+      // Recency bonus — subtract up to 5 pts for very recent sales
+      const soldDate = sale.saleTransDate || "";
+      const monthsAgo = soldDate ? (now - new Date(soldDate)) / (1000*60*60*24*30) : 36;
+      score += Math.min(monthsAgo * 0.3, 10); // up to 10 pts for age
+
+      return {
+        address:      [p.address?.line1, p.address?.locality, p.address?.countrySubd].filter(Boolean).join(", "),
+        beds:         String(beds ?? ""),
+        baths:        String(baths ?? ""),
+        sqft,
+        salePrice,
+        pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,
+        soldDate:     soldDate ? soldDate.slice(0, 10) : "",
+        notes:        `ATTOM verified sale${searchNote ? " · "+searchNote : ""}`,
+        source:       "attom",
+        matchScore:   Math.round(score * 10) / 10,
+        matchFlags:   flags,  // passed to frontend for display
+      };
+    };
+
+    // ── Helper: post-filter and score a raw result set ──
+    // Drops comps outside ±30% sqft (if subject sqft known), then sorts by score
+    const processResults = (props, searchNote) => {
+      const comps = props.map(p => toComp(p, searchNote));
+      let filtered = comps;
+      if (subjectSqft) {
+        const within30 = comps.filter(c => c.sqft === 0 || Math.abs(c.sqft - subjectSqft) / subjectSqft <= 0.30);
+        if (within30.length >= 3) filtered = within30;
+        // if ±30% gives fewer than 3, fall back to ±50% before giving up on sqft filter
+        else {
+          const within50 = comps.filter(c => c.sqft === 0 || Math.abs(c.sqft - subjectSqft) / subjectSqft <= 0.50);
+          if (within50.length >= 3) filtered = within50;
+          // else keep all — sqft filter would leave us with too few
+        }
+      }
+      filtered.sort((a, b) => a.matchScore - b.matchScore);
+      return filtered;
+    };
+
+    // Build bed/bath filter — exact match first, widen in fallback
+    const exactBedBath = {};
+    if (subjectBeds)  { exactBedBath.minbeds  = subjectBeds;  exactBedBath.maxbeds  = subjectBeds; }
+    if (subjectBaths) { exactBedBath.minbaths = Math.floor(subjectBaths); exactBedBath.maxbaths = Math.ceil(subjectBaths) + 1; }
+
+    const looseBedBath = {};
+    if (subjectBeds)  { looseBedBath.minbeds  = Math.max(1, subjectBeds  - 1); looseBedBath.maxbeds  = subjectBeds  + 1; }
+    if (subjectBaths) { looseBedBath.minbaths = Math.max(1, subjectBaths - 1); looseBedBath.maxbaths = subjectBaths + 1; }
+
+    // Ladder: exact beds first, then ±1, then no filter — each with progressive radius/date
     const searches = [
-      { months: 12, radius: "0.5" },
-      { months: 24, radius: "1.0" },
-      { months: 36, radius: "1.5" },
-      { months: 36, radius: "2.0" },
+      { months: 12, radius: "0.5", bedBath: exactBedBath, label: "exact beds" },
+      { months: 24, radius: "1.0", bedBath: exactBedBath, label: "exact beds" },
+      { months: 36, radius: "1.5", bedBath: exactBedBath, label: "exact beds" },
+      { months: 24, radius: "1.0", bedBath: looseBedBath, label: "±1 bed/bath" },
+      { months: 36, radius: "2.0", bedBath: looseBedBath, label: "±1 bed/bath" },
+      { months: 36, radius: "2.0", bedBath: {},           label: "no bed filter" },
     ];
 
-    let sales = null;
+    let bestComps  = null;
     let usedSearch = null;
 
     for (const s of searches) {
       const start = new Date(now);
       start.setMonth(start.getMonth() - s.months);
       const data = await attomGet("/sale/snapshot", {
-        latitude,
-        longitude,
+        latitude, longitude,
         radius:              s.radius,
         startSaleSearchDate: fmt(start),
         endSaleSearchDate:   fmt(now),
         pageSize:            "25",
         propertytype:        "SFR",
-        ...bedBathParams,
+        ...s.bedBath,
       });
       const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0);
-      if (props && props.length >= 3) {
-        sales = props;
+      if (!props || props.length === 0) continue;
+
+      const scored = processResults(props, s.label !== "exact beds" ? s.label : null);
+      if (scored.length >= 3) {
+        bestComps  = scored;
         usedSearch = s;
         break;
       }
     }
 
-    // If still nothing with bed/bath filter, try without it at widest range
-    if (!sales || sales.length < 3) {
-      const start = new Date(now);
-      start.setMonth(start.getMonth() - 36);
-      const data = await attomGet("/sale/snapshot", {
-        latitude, longitude,
-        radius:              "2.0",
-        startSaleSearchDate: fmt(start),
-        endSaleSearchDate:   fmt(now),
-        pageSize:            "25",
-        propertytype:        "SFR",
-      });
-      const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0);
-      if (props && props.length > 0) { sales = props; usedSearch = { months: 36, radius: "2.0", note: "no bed/bath filter" }; }
-    }
-
-    if (sales && sales.length > 0) {
-      // Sort newest first, take top 5
-      sales.sort((a, b) => (b.sale?.saleTransDate||"").localeCompare(a.sale?.saleTransDate||""));
-      result.comps = sales.slice(0, 5).map(p => {
-        const b         = p.building || {};
-        const sale      = p.sale || {};
-        const sqft      = b.size?.universalsize || b.size?.livingsize || 0;
-        const salePrice = sale.amount?.saleamt || 0;
-        return {
-          address:      [p.address?.line1, p.address?.locality, p.address?.countrySubd].filter(Boolean).join(", "),
-          beds:         String(b.rooms?.beds || ""),
-          baths:        String(b.rooms?.bathstotal || b.rooms?.bathsfull || ""),
-          sqft:         sqft,
-          salePrice:    salePrice,
-          pricePerSqft: sqft > 0 ? Math.round(salePrice / sqft) : 0,
-          soldDate:     sale.saleTransDate ? sale.saleTransDate.slice(0, 10) : "",
-          notes:        `ATTOM verified sale${usedSearch?.note ? " · "+usedSearch.note : ""}`,
-          source:       "attom",
-        };
-      });
-      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi${usedSearch?.note ? " · "+usedSearch.note : ""} — ${sales.length} found)`;
+    if (bestComps && bestComps.length > 0) {
+      result.comps = bestComps.slice(0, 5);
+      result.subjectSqft = subjectSqft; // pass to frontend for flag rendering
+      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi${usedSearch.label !== "exact beds" ? " · "+usedSearch.label : ""} — ${bestComps.length} scored)`;
     } else {
       result.sources.comps = "no SFR sales found within 36 months / 2mi — using AI estimates";
     }

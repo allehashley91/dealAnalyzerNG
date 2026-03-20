@@ -268,39 +268,41 @@ app.post("/api/attom/lookup", async (req, res) => {
     const subjectBaths = result.property?.baths ? parseFloat(result.property.baths) : null;
     const subjectSqft  = result.property?.sqft  ? parseInt(result.property.sqft)   : null;
 
-    // ── Helper: convert raw ATTOM property to comp object with match metadata ──
+    // ── Helper: score and flag a single comp against the subject ──
     const toComp = (p, searchNote) => {
       const b         = p.building || {};
       const sale      = p.sale || {};
       const sqft      = b.size?.universalsize || b.size?.livingsize || 0;
       const salePrice = sale.amount?.saleamt || 0;
       const beds      = b.rooms?.beds ? parseInt(b.rooms.beds) : null;
-      const baths     = b.rooms?.bathstotal || b.rooms?.bathsfull ? parseFloat(b.rooms?.bathstotal || b.rooms?.bathsfull) : null;
+      const baths     = b.rooms?.bathstotal || b.rooms?.bathsfull
+                          ? parseFloat(b.rooms?.bathstotal || b.rooms?.bathsfull) : null;
+      const soldDate  = sale.saleTransDate || "";
+      const monthsAgo = soldDate ? (now - new Date(soldDate)) / (1000*60*60*24*30) : 36;
 
-      // Similarity score — lower = better match
-      // Components: sqft diff (weighted heaviest), bed diff, bath diff, recency
       let score = 0;
       const flags = [];
 
+      // Sqft — weighted heaviest (60pts). ±20% is the hard filter applied later.
       if (subjectSqft && sqft) {
         const sqftPct = Math.abs(sqft - subjectSqft) / subjectSqft;
-        score += sqftPct * 40;  // up to 40 points for sqft diff
-        if (sqftPct > 0.30) flags.push(`sqft off ${Math.round(sqftPct*100)}%`);
+        score += sqftPct * 60;
+        if (sqftPct > 0.20) flags.push(`sqft off ${Math.round(sqftPct*100)}%`);
       }
+      // Beds — secondary (5pts each). A 5bd comp for a 4bd subject is fine.
       if (subjectBeds && beds !== null) {
         const bedDiff = Math.abs(beds - subjectBeds);
-        score += bedDiff * 10;  // 10 pts per bed off
-        if (bedDiff > 1) flags.push(`${bedDiff} bed diff`);
+        score += bedDiff * 5;
+        if (bedDiff > 2) flags.push(`${bedDiff} bed diff`);
       }
+      // Baths (4pts each)
       if (subjectBaths && baths !== null) {
         const bathDiff = Math.abs(baths - subjectBaths);
-        score += bathDiff * 5;  // 5 pts per bath off
+        score += bathDiff * 4;
         if (bathDiff > 1) flags.push(`${bathDiff} bath diff`);
       }
-      // Recency bonus — subtract up to 5 pts for very recent sales
-      const soldDate = sale.saleTransDate || "";
-      const monthsAgo = soldDate ? (now - new Date(soldDate)) / (1000*60*60*24*30) : 36;
-      score += Math.min(monthsAgo * 0.3, 10); // up to 10 pts for age
+      // Recency (up to 10pts — older = worse)
+      score += Math.min(monthsAgo * 0.3, 10);
 
       return {
         address:      [p.address?.line1, p.address?.locality, p.address?.countrySubd].filter(Boolean).join(", "),
@@ -313,46 +315,56 @@ app.post("/api/attom/lookup", async (req, res) => {
         notes:        `ATTOM verified sale${searchNote ? " · "+searchNote : ""}`,
         source:       "attom",
         matchScore:   Math.round(score * 10) / 10,
-        matchFlags:   flags,  // passed to frontend for display
+        matchFlags:   flags,
       };
     };
 
-    // ── Helper: post-filter and score a raw result set ──
-    // Drops comps outside ±30% sqft (if subject sqft known), then sorts by score
+    // ── Helper: apply sqft filter cascade, then sort by score ──
+    // ±20% is required. Falls back to ±30%, then ±50% only if needed to get 3 comps.
     const processResults = (props, searchNote) => {
       const comps = props.map(p => toComp(p, searchNote));
-      let filtered = comps;
-      if (subjectSqft) {
-        const within30 = comps.filter(c => c.sqft === 0 || Math.abs(c.sqft - subjectSqft) / subjectSqft <= 0.30);
-        if (within30.length >= 3) filtered = within30;
-        // if ±30% gives fewer than 3, fall back to ±50% before giving up on sqft filter
-        else {
-          const within50 = comps.filter(c => c.sqft === 0 || Math.abs(c.sqft - subjectSqft) / subjectSqft <= 0.50);
-          if (within50.length >= 3) filtered = within50;
-          // else keep all — sqft filter would leave us with too few
+      if (!subjectSqft) {
+        comps.sort((a, b) => a.matchScore - b.matchScore);
+        return comps;
+      }
+      for (const pct of [0.20, 0.30, 0.50]) {
+        const filtered = comps.filter(c => c.sqft === 0 || Math.abs(c.sqft - subjectSqft) / subjectSqft <= pct);
+        if (filtered.length >= 3) {
+          filtered.sort((a, b) => a.matchScore - b.matchScore);
+          return filtered;
         }
       }
-      filtered.sort((a, b) => a.matchScore - b.matchScore);
-      return filtered;
+      comps.sort((a, b) => a.matchScore - b.matchScore);
+      return comps;
     };
 
-    // Build bed/bath filter — exact match first, widen in fallback
-    const exactBedBath = {};
-    if (subjectBeds)  { exactBedBath.minbeds  = subjectBeds;  exactBedBath.maxbeds  = subjectBeds; }
-    if (subjectBaths) { exactBedBath.minbaths = Math.floor(subjectBaths); exactBedBath.maxbaths = Math.ceil(subjectBaths) + 1; }
+    // ── Helper: quality check — are selected comps representative? ──
+    // Returns true if avg sqft of top-5 comps is <60% of subject (means comps are too small)
+    const compsAreTooSmall = (comps) => {
+      if (!subjectSqft || comps.length === 0) return false;
+      const withSqft = comps.filter(c => c.sqft > 0).slice(0, 5);
+      if (withSqft.length === 0) return false;
+      const avgSqft = withSqft.reduce((s, c) => s + c.sqft, 0) / withSqft.length;
+      return avgSqft < subjectSqft * 0.60;
+    };
 
-    const looseBedBath = {};
-    if (subjectBeds)  { looseBedBath.minbeds  = Math.max(1, subjectBeds  - 1); looseBedBath.maxbeds  = subjectBeds  + 1; }
-    if (subjectBaths) { looseBedBath.minbaths = Math.max(1, subjectBaths - 1); looseBedBath.maxbaths = subjectBaths + 1; }
+    // ── Bed filter params ──
+    // Use ±2 beds from the start — sqft is the primary filter, beds are secondary
+    const bedBath = {};
+    if (subjectBeds)  { bedBath.minbeds  = Math.max(1, subjectBeds - 2); bedBath.maxbeds  = subjectBeds + 2; }
+    if (subjectBaths) { bedBath.minbaths = Math.max(1, Math.floor(subjectBaths) - 1); bedBath.maxbaths = Math.ceil(subjectBaths) + 1; }
 
-    // Ladder: exact beds first, then ±1, then no filter — each with progressive radius/date
+    // ── Search ladder ──
+    // Each tier tries ±2 beds. If quality check fails (comps too small), we retry
+    // with no bed filter at the widest radius to find sqft-similar homes.
     const searches = [
-      { months: 12, radius: "0.5", bedBath: exactBedBath, label: "exact beds" },
-      { months: 24, radius: "1.0", bedBath: exactBedBath, label: "exact beds" },
-      { months: 36, radius: "1.5", bedBath: exactBedBath, label: "exact beds" },
-      { months: 24, radius: "1.0", bedBath: looseBedBath, label: "±1 bed/bath" },
-      { months: 36, radius: "2.0", bedBath: looseBedBath, label: "±1 bed/bath" },
-      { months: 36, radius: "2.0", bedBath: {},           label: "no bed filter" },
+      { months: 12, radius: "0.5", bedBath, label: null },
+      { months: 24, radius: "1.0", bedBath, label: null },
+      { months: 36, radius: "1.5", bedBath, label: null },
+      { months: 36, radius: "2.0", bedBath, label: null },
+      // No-bed fallback tiers — reached if ±2 beds keeps returning too-small comps
+      { months: 36, radius: "2.0", bedBath: {}, label: "no bed filter" },
+      { months: 36, radius: "3.0", bedBath: {}, label: "no bed filter · 3mi" },
     ];
 
     let bestComps  = null;
@@ -373,20 +385,46 @@ app.post("/api/attom/lookup", async (req, res) => {
       const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0);
       if (!props || props.length === 0) continue;
 
-      const scored = processResults(props, s.label !== "exact beds" ? s.label : null);
-      if (scored.length >= 3) {
-        bestComps  = scored;
-        usedSearch = s;
-        break;
+      const scored = processResults(props, s.label);
+      if (scored.length < 3) continue;
+
+      // Quality check: if comps are all much smaller than subject, keep searching
+      if (compsAreTooSmall(scored)) continue;
+
+      bestComps  = scored;
+      usedSearch = s;
+      break;
+    }
+
+    // If every tier failed quality check, use the best we found across all tiers
+    if (!bestComps) {
+      for (const s of searches) {
+        const start = new Date(now);
+        start.setMonth(start.getMonth() - s.months);
+        const data = await attomGet("/sale/snapshot", {
+          latitude, longitude,
+          radius:              s.radius,
+          startSaleSearchDate: fmt(start),
+          endSaleSearchDate:   fmt(now),
+          pageSize:            "25",
+          propertytype:        "SFR",
+          ...s.bedBath,
+        });
+        const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0);
+        if (!props || props.length === 0) continue;
+        const scored = processResults(props, s.label);
+        if (scored.length >= 3) { bestComps = scored; usedSearch = s; break; }
       }
     }
 
     if (bestComps && bestComps.length > 0) {
       result.comps = bestComps.slice(0, 5);
-      result.subjectSqft = subjectSqft; // pass to frontend for flag rendering
-      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi${usedSearch.label !== "exact beds" ? " · "+usedSearch.label : ""} — ${bestComps.length} scored)`;
+      result.subjectSqft = subjectSqft;
+      const avgCompSqft = result.comps.filter(c=>c.sqft>0).reduce((s,c)=>s+c.sqft,0) / result.comps.filter(c=>c.sqft>0).length;
+      const qualityNote = subjectSqft && avgCompSqft < subjectSqft * 0.60 ? " ⚠️ comps smaller than subject" : "";
+      result.sources.comps = `attom (${usedSearch.months}mo / ${usedSearch.radius}mi${usedSearch.label ? " · "+usedSearch.label : ""} — ${bestComps.length} found)${qualityNote}`;
     } else {
-      result.sources.comps = "no SFR sales found within 36 months / 2mi — using AI estimates";
+      result.sources.comps = "no SFR sales found within 36 months / 3mi — using AI estimates";
     }
   } catch(e) {
     result.sources.comps = "error: " + e.message;

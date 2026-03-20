@@ -661,6 +661,7 @@
       const [arvAnalysis,setArvAnalysis]=useState(null);
       const [arvLoading,setArvLoading]=useState(false);
       const [arvSource,setArvSource]=useState("none"); // "none"|"ai"|"comps"|"manual"
+      const arvSourceRef=React.useRef("none"); // mirrors arvSource synchronously for useEffect guard
       const [attomLoading,setAttomLoading]=useState(false);
       const [attomResult,setAttomResult]=useState(null); // {sources, property, avm, tax, comps}
       const [attomConfigured,setAttomConfigured]=useState(null); // null=unknown, true/false
@@ -692,9 +693,13 @@
         return Math.round(avgPsf*sqft);
       },[d.comps,d.sqft]);
 
+      // Keep ref in sync with arvSource state
+      React.useEffect(()=>{ arvSourceRef.current=arvSource; },[arvSource]);
+
       // When arvSource="comps", keep ARV in sync with appPredictedArv whenever comps or sqft change
+      // Use ref to guard — avoids stale closure firing during loadFromHistory
       React.useEffect(()=>{
-        if(arvSource==="comps" && appPredictedArv>0){
+        if(arvSourceRef.current==="comps" && appPredictedArv>0){
           setD(p=>({...p,arv:appPredictedArv}));
         }
       },[arvSource, appPredictedArv]);
@@ -842,9 +847,10 @@
       };
 
       const loadFromHistory=(h)=>{
+        arvSourceRef.current = h.arvSource||"manual"; // set ref first so useEffect guard is immediate
+        setArvSource(h.arvSource||"manual");
         setD({...DEF,...(h.deal||{})});
         setPasteText(h.pasteText||"");
-        setArvSource(h.arvSource||"manual");
         setArvAnalysis(null);
         setAiMessages([]);
         setAiQuestion("");
@@ -978,7 +984,9 @@
           const parsed=JSON.parse(match[0]);
           // Only treat ARV as user-provided if the original listing text explicitly mentions ARV/after repair value
           const listingMentionsArv = /arv|after.?repair|after.?rehab/i.test(pasteText);
-          setArvSource(listingMentionsArv ? "ai" : "none");
+          const newSrc = listingMentionsArv ? "ai" : "none";
+          arvSourceRef.current = newSrc;
+          setArvSource(newSrc);
           setD(p=>({...p,...parsed,comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
           setArvAnalysis(null);
           setTab("📊 Analysis");
@@ -1014,7 +1022,12 @@
                   return next;
                 });
                 // Signal that ATTOM comps just landed — useEffect will apply ARV
-                if(attomData.comps?.length>0) setArvSource(src=>src==="manual"?src:"comps");
+                if(attomData.comps?.length>0){
+                  if(arvSourceRef.current!=="manual"){
+                    arvSourceRef.current="comps";
+                    setArvSource("comps");
+                  }
+                }
               }
             }catch(e){ /* silent — AI comps remain */ }
             setAttomLoading(false);
@@ -1316,7 +1329,7 @@ FOLLOW-UP QUESTIONS
                     </div>
                     <div className="bg-gray-800 rounded-xl p-4">
                       <h2 className="text-xs font-semibold text-indigo-400 mb-3 uppercase">Valuation & Rehab</h2>
-                      <F label="ARV"><input type="number" className={inp} value={d.arv||""} onChange={e=>{num("arv",e.target.value);setArvSource("manual");}}/></F>
+                      <F label="ARV"><input type="number" className={inp} value={d.arv||""} onChange={e=>{num("arv",e.target.value);arvSourceRef.current="manual";setArvSource("manual");}}/></F>
                       <F label="AS-IS MLS Value"><input type="number" className={inp} value={d.asisValue||""} onChange={e=>num("asisValue",e.target.value)}/></F>
                       <F label="Purchase Price"><input type="number" className={inp} value={d.purchasePrice||""} onChange={e=>num("purchasePrice",e.target.value)}/></F>
                       <F label="Rehab Cost"><input type="number" className={inp} value={d.rehabCost||""} onChange={e=>num("rehabCost",e.target.value)}/></F>
@@ -1441,7 +1454,7 @@ FOLLOW-UP QUESTIONS
                     {d.comps?.length>0&&(
                       <div className="bg-gray-800 rounded-xl p-3">
                         <div className="text-xs font-semibold text-indigo-400 mb-2 uppercase">🏘️ Comparable Sales — ARV Basis</div>
-                        <CompsTable comps={d.comps} arv={d.arv} subject={d} arvSource={arvSource} onApplyArv={v=>{setD(p=>({...p,arv:v}));setArvSource("comps");}}/>
+                        <CompsTable comps={d.comps} arv={d.arv} subject={d} arvSource={arvSource} onApplyArv={v=>{setD(p=>({...p,arv:v}));arvSourceRef.current="comps";setArvSource("comps");}}/>
                       </div>
                     )}
 

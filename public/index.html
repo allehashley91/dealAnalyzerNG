@@ -662,6 +662,7 @@
       const [arvLoading,setArvLoading]=useState(false);
       const [arvSource,setArvSource]=useState("none"); // "none"|"ai"|"comps"|"manual"
       const arvSourceRef=React.useRef("none"); // mirrors arvSource synchronously for useEffect guard
+      const smartParseActiveRef=React.useRef(false); // suppresses address-debounce ATTOM fetch during Smart Analysis
       const [attomLoading,setAttomLoading]=useState(false);
       const [attomResult,setAttomResult]=useState(null); // {sources, property, avm, tax, comps}
       const [attomConfigured,setAttomConfigured]=useState(null); // null=unknown, true/false
@@ -743,9 +744,11 @@
       },[]);
 
       // Auto-fetch ATTOM data when address changes (debounced 1.2s)
+      // Suppressed during Smart Analysis — it handles its own ATTOM fetch
       useEffect(()=>{
         if(!d.address||d.address.trim().length<10) return;
         if(!attomConfigured) return;
+        if(smartParseActiveRef.current) return;
         const timer=setTimeout(async()=>{
           setAttomLoading(true);
           setAttomResult(null);
@@ -963,6 +966,7 @@
 
       const smartParse=useCallback(async()=>{
         if(!pasteText.trim())return;
+        smartParseActiveRef.current=true;
         setParsing(true);
         setParseError("");
         let rawText="";
@@ -978,7 +982,13 @@
           const newSrc = listingMentionsArv ? "ai" : "none";
           arvSourceRef.current = newSrc;
           setArvSource(newSrc);
-          setD(p=>({...p,...parsed,comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
+          // Spread parsed but exclude arv — ATTOM will set it from real comps.
+          // Only keep AI arv if listing explicitly stated one AND no ATTOM configured.
+          const {arv: aiArv, ...parsedWithoutArv} = parsed;
+          const useAiArv = listingMentionsArv || !attomConfigured;
+          setD(p=>({...p,...parsedWithoutArv,
+            arv: useAiArv ? (aiArv||0) : 0,
+            comps:Array.isArray(parsed.comps)?parsed.comps:[]}));
           setArvAnalysis(null);
           setTab("📊 Analysis");
           // Trigger ATTOM lookup with the parsed address — replaces AI comps with real data
@@ -1031,6 +1041,7 @@
         }catch(e){
           setParseError("❌ "+e.message+(rawText?"\n\nRaw response snippet:\n"+rawText.slice(0,400):""));
         }
+        smartParseActiveRef.current=false;
         setParsing(false);
       },[pasteText]);
 

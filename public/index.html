@@ -717,6 +717,8 @@
               neighborhood: row.snapshot?.neighborhood||"",
               holdMonths: row.snapshot?.holdMonths||6,
               compsCount: row.snapshot?.comps?.length||0,
+              pasteText: row.snapshot?.pasteText||"",
+              arvSource: row.snapshot?.arvSource||"manual",
               deal: row.snapshot?.deal||row.snapshot,
             })));
           } else {
@@ -799,6 +801,8 @@
           neighborhood:d.neighborhood,
           holdMonths:d.holdMonths,
           comps:d.comps,
+          pasteText:pasteText,
+          arvSource:arvSource,
         };
         try{
           const res=await fetch("/api/history/save",{
@@ -830,6 +834,8 @@
 
       const loadFromHistory=(h)=>{
         setD({...DEF,...(h.deal||{})});
+        setPasteText(h.pasteText||"");
+        setArvSource(h.arvSource||"manual");
         setArvAnalysis(null);
         setAiMessages([]);
         setAiQuestion("");

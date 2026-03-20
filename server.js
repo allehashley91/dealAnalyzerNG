@@ -433,50 +433,64 @@ app.post("/api/attom/lookup", async (req, res) => {
   res.json(result);
 });
 
-// GET /api/attom/compdebug?address=... — shows exactly what sale/snapshot returns
+// GET /api/attom/compdebug?address=... — full diagnostic: raw ATTOM results before any filtering
 app.get("/api/attom/compdebug", async (req, res) => {
   const address = req.query.address;
-  if (!address) return res.json({ error: "Pass ?address=123 Main St, City, ST" });
+  if (!address) return res.json({ error: "Pass ?address=123 Main St, City, ST 12345" });
   const parts = address.split(",").map(s => s.trim());
   const address1 = parts[0];
   const address2 = parts.slice(1).join(", ").trim();
 
-  // First get lat/long
-  let latitude, longitude, attomId;
+  let latitude, longitude, attomId, subjectSqft, subjectBeds;
   try {
     const d = await attomGet("/property/detail", { address1, address2 });
     const prop = d?.property?.[0];
-    attomId   = prop?.identifier?.attomId;
-    latitude  = parseFloat(prop?.location?.latitude);
-    longitude = parseFloat(prop?.location?.longitude);
+    attomId     = prop?.identifier?.attomId;
+    latitude    = parseFloat(prop?.location?.latitude);
+    longitude   = parseFloat(prop?.location?.longitude);
+    subjectSqft = prop?.building?.size?.universalsize || prop?.building?.size?.livingsize || null;
+    subjectBeds = prop?.building?.rooms?.beds || null;
   } catch(e) { return res.json({ error: "Property detail failed: " + e.message }); }
 
-  if (!latitude || !longitude) return res.json({ error: "No lat/long returned", attomId, latitude, longitude });
+  if (!latitude || !longitude) return res.json({ error: "No lat/long", attomId });
 
-  const now   = new Date();
-  const start = new Date(now);
-  start.setMonth(start.getMonth() - 24);
+  const now = new Date();
   const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+  const start36 = new Date(now); start36.setMonth(start36.getMonth() - 36);
 
-  // Try without any filters first so we can see raw results
-  try {
-    const data = await attomGet("/sale/snapshot", {
-      latitude, longitude,
-      radius: "1.0",
-      startSaleSearchDate: fmt(start),
-      endSaleSearchDate:   fmt(now),
-      pageSize: "10",
-    });
-    const summary = data?.property?.map(p => ({
-      address: p.address?.oneLine,
-      sale: p.sale,
-      buildingRooms: p.building?.rooms,
-      buildingSize: p.building?.size,
-    }));
-    res.json({ attomId, latitude, longitude, total: data?.status?.total, returned: summary?.length, properties: summary });
-  } catch(e) {
-    res.json({ error: e.message, attomId, latitude, longitude });
+  const radii = ["0.5", "1.0", "2.0", "3.0"];
+  const results = {};
+
+  for (const radius of radii) {
+    try {
+      const data = await attomGet("/sale/snapshot", {
+        latitude, longitude, radius,
+        startSaleSearchDate: fmt(start36),
+        endSaleSearchDate:   fmt(now),
+        pageSize: "25",
+        propertytype: "SFR",
+      });
+      const props = data?.property?.filter(p => p?.sale?.amount?.saleamt > 0) || [];
+      results[`${radius}mi_36mo`] = {
+        total: props.length,
+        properties: props.map(p => ({
+          address:    p.address?.oneLine,
+          beds:       p.building?.rooms?.beds,
+          baths:      p.building?.rooms?.bathstotal || p.building?.rooms?.bathsfull,
+          sqft:       p.building?.size?.universalsize || p.building?.size?.livingsize,
+          salePrice:  p.sale?.amount?.saleamt,
+          soldDate:   p.sale?.saleTransDate?.slice(0,10),
+          sqftDiffPct: subjectSqft && (p.building?.size?.universalsize || p.building?.size?.livingsize)
+            ? Math.round(Math.abs((p.building.size.universalsize||p.building.size.livingsize) - subjectSqft) / subjectSqft * 100) + "%"
+            : "unknown",
+        })).sort((a,b) => (b.soldDate||"").localeCompare(a.soldDate||"")),
+      };
+    } catch(e) {
+      results[`${radius}mi_36mo`] = { error: e.message };
+    }
   }
+
+  res.json({ attomId, latitude, longitude, subjectSqft, subjectBeds, results });
 });
 
 // GET /api/attom/debug?address=... — returns raw ATTOM responses for troubleshooting
